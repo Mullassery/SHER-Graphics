@@ -154,6 +154,10 @@ impl PresentationBridge {
         self.display.register_connector(connector)
     }
 
+    pub fn has_connector(&self, connector_id: &ObjectId) -> bool {
+        self.display.get_connector(connector_id).is_some()
+    }
+
     pub fn present(
         &mut self,
         connector_id: &ObjectId,
@@ -164,6 +168,19 @@ impl PresentationBridge {
         self.display.page_flip(connector_id, &framebuffer.id)?;
         Ok(framebuffer.id)
     }
+}
+
+/// The rendering-mechanism half of the cursor, per ARCHITECTURE.md
+/// section 44: SHER-GRAPHICS knows how to efficiently render the cursor,
+/// nothing more. `position` is a render-time coordinate SHER-DISPLAY hands
+/// down every time it changes, not something SHER-GRAPHICS tracks from raw
+/// input — there is deliberately no way to *derive* a `CursorState` from a
+/// pointer event here, only to set one from the outside.
+#[derive(Debug, Clone, Default)]
+pub struct CursorState {
+    pub image: Option<ObjectId>,
+    pub position: (i32, i32),
+    pub visible: bool,
 }
 
 pub struct GraphicsRuntime<D: GpuDriver> {
@@ -192,6 +209,8 @@ pub struct GraphicsRuntime<D: GpuDriver> {
     /// presented `caps` is tracked as follow-up work alongside that
     /// upstream gap.
     audit: AuditLog,
+    /// Cursor rendering state per presentation connector — see `CursorState`.
+    cursors: HashMap<ObjectId, CursorState>,
 }
 
 impl<D: GpuDriver> GraphicsRuntime<D> {
@@ -206,6 +225,7 @@ impl<D: GpuDriver> GraphicsRuntime<D> {
             timelines: HashMap::new(),
             presentation: PresentationBridge::new(presentation_vram_bytes),
             audit: AuditLog::default(),
+            cursors: HashMap::new(),
         }
     }
 
@@ -240,6 +260,63 @@ impl<D: GpuDriver> GraphicsRuntime<D> {
         height: u32,
     ) -> Result<ObjectId> {
         self.presentation.present(connector, width, height)
+    }
+
+    /// Looks up (or lazily creates) the cursor state for `connector`,
+    /// rejecting connectors the presentation bridge doesn't know about —
+    /// there is no cursor without a presentation target to render it on.
+    fn cursor_mut(&mut self, connector: &ObjectId) -> Result<&mut CursorState> {
+        if !self.presentation.has_connector(connector) {
+            return Err(Error::Device("unknown presentation connector".to_string()));
+        }
+        Ok(self.cursors.entry(*connector).or_default())
+    }
+
+    /// Sets the image SHER-GRAPHICS renders as the cursor on `connector`.
+    /// ARCHITECTURE.md section 44: this is purely "how to render it" —
+    /// `image` must already be a registered `Image` resource; SHER-GRAPHICS
+    /// never decides *which* image represents "the cursor" on its own.
+    pub fn set_cursor_image(&mut self, connector: &ObjectId, image: &ObjectId) -> Result<()> {
+        let resource = self
+            .resources
+            .get(image)
+            .ok_or_else(|| Error::Device("unknown cursor image resource".to_string()))?;
+        if !matches!(resource.kind, ResourceKind::Image { .. }) {
+            return Err(Error::Device(
+                "cursor image resource must be an Image, not a Buffer".to_string(),
+            ));
+        }
+        self.cursor_mut(connector)?.image = Some(*image);
+        Ok(())
+    }
+
+    /// Moves the rendered cursor to `(x, y)`. The coordinate is handed down
+    /// by SHER-DISPLAY (which owns cursor policy and target) every time it
+    /// changes — SHER-GRAPHICS does not compute or track it independently.
+    pub fn set_cursor_position(&mut self, connector: &ObjectId, x: i32, y: i32) -> Result<()> {
+        self.cursor_mut(connector)?.position = (x, y);
+        Ok(())
+    }
+
+    pub fn show_cursor(&mut self, connector: &ObjectId) -> Result<()> {
+        self.cursor_mut(connector)?.visible = true;
+        Ok(())
+    }
+
+    pub fn hide_cursor(&mut self, connector: &ObjectId) -> Result<()> {
+        self.cursor_mut(connector)?.visible = false;
+        Ok(())
+    }
+
+    /// Returns the default (no image, hidden, origin position) `CursorState`
+    /// for a connector that's registered but has never had a cursor
+    /// primitive called on it, rather than treating "no cursor set yet" as
+    /// an error the way an unregistered connector is.
+    pub fn cursor_state(&self, connector: &ObjectId) -> Result<CursorState> {
+        if !self.presentation.has_connector(connector) {
+            return Err(Error::Device("unknown presentation connector".to_string()));
+        }
+        Ok(self.cursors.get(connector).cloned().unwrap_or_default())
     }
 
     /// Escape hatch to the underlying driver, for test/debug hooks
@@ -287,7 +364,8 @@ impl<D: GpuDriver> GraphicsRuntime<D> {
     /// tracked as follow-up work alongside a real timeline registry.
     pub fn recover_device(&mut self, device: &ObjectId, caps: &CapabilitySet) -> Result<()> {
         let authorized = graphics_api::require_capability(caps, Capability::GpuAdmin);
-        self.audit.log(*device, "recover_device", authorized.is_ok());
+        self.audit
+            .log(*device, "recover_device", authorized.is_ok());
         authorized?;
         let gpu = self.device(device)?.gpu;
         self.driver.reset_device(&gpu)?;
@@ -484,7 +562,7 @@ mod tests {
     use super::*;
     use gpu_abstraction::SoftwareGpuDriver;
     use gpu_driver::{ConnectorStatus, ConnectorType};
-    use graphics_api::BufferUsage;
+    use graphics_api::{BufferUsage, ImageUsage};
     use sher_common::PermissionTier;
 
     fn caps_with(cap: Capability) -> CapabilitySet {
@@ -716,6 +794,106 @@ mod tests {
         assert_ne!(framebuffer, ObjectId::nil());
     }
 
+    fn registered_connector(runtime: &mut GraphicsRuntime<SoftwareGpuDriver>) -> ObjectId {
+        let connector = Connector {
+            id: ObjectId::new(),
+            connector_type: ConnectorType::HDMI,
+            status: ConnectorStatus::Connected,
+            supported_modes: vec![],
+            current_mode: None,
+        };
+        let connector_id = connector.id;
+        runtime.register_connector(connector).unwrap();
+        connector_id
+    }
+
+    #[test]
+    fn cursor_state_defaults_hidden_with_no_image() {
+        let (mut runtime, _device) = runtime_with_device();
+        let connector_id = registered_connector(&mut runtime);
+
+        let state = runtime.cursor_state(&connector_id).unwrap();
+        assert!(state.image.is_none());
+        assert!(!state.visible);
+        assert_eq!(state.position, (0, 0));
+    }
+
+    #[test]
+    fn cursor_state_requires_known_connector() {
+        let (runtime, _device) = runtime_with_device();
+        assert!(runtime.cursor_state(&ObjectId::new()).is_err());
+    }
+
+    #[test]
+    fn cursor_primitives_update_state_without_touching_input_or_display_semantics() {
+        let (mut runtime, device) = runtime_with_device();
+        let connector_id = registered_connector(&mut runtime);
+        let image = runtime
+            .create_resource(
+                &device.id,
+                ResourceKind::Image {
+                    width: 32,
+                    height: 32,
+                    depth: 1,
+                    format: PixelFormat::Rgba8Unorm,
+                    usage: ImageUsage {
+                        sampled: true,
+                        ..Default::default()
+                    },
+                },
+                MemoryClass::DeviceLocal,
+            )
+            .unwrap();
+
+        runtime.set_cursor_image(&connector_id, &image.id).unwrap();
+        runtime.set_cursor_position(&connector_id, 42, 17).unwrap();
+        runtime.show_cursor(&connector_id).unwrap();
+
+        let state = runtime.cursor_state(&connector_id).unwrap();
+        assert_eq!(state.image, Some(image.id));
+        assert_eq!(state.position, (42, 17));
+        assert!(state.visible);
+
+        runtime.hide_cursor(&connector_id).unwrap();
+        assert!(!runtime.cursor_state(&connector_id).unwrap().visible);
+    }
+
+    #[test]
+    fn set_cursor_image_rejects_buffer_resource() {
+        let (mut runtime, device) = runtime_with_device();
+        let connector_id = registered_connector(&mut runtime);
+        let buffer = runtime
+            .create_resource(
+                &device.id,
+                ResourceKind::Buffer {
+                    size: 64,
+                    usage: BufferUsage::default(),
+                },
+                MemoryClass::HostVisible,
+            )
+            .unwrap();
+
+        assert!(runtime.set_cursor_image(&connector_id, &buffer.id).is_err());
+    }
+
+    #[test]
+    fn set_cursor_image_rejects_unknown_resource() {
+        let (mut runtime, _device) = runtime_with_device();
+        let connector_id = registered_connector(&mut runtime);
+        assert!(runtime
+            .set_cursor_image(&connector_id, &ObjectId::new())
+            .is_err());
+    }
+
+    #[test]
+    fn cursor_primitives_reject_unknown_connector() {
+        let (mut runtime, _device) = runtime_with_device();
+        let unknown = ObjectId::new();
+        assert!(runtime.set_cursor_position(&unknown, 1, 1).is_err());
+        assert!(runtime.show_cursor(&unknown).is_err());
+        assert!(runtime.hide_cursor(&unknown).is_err());
+    }
+
     #[test]
     fn submit_rejects_draw_without_bound_pipeline() {
         let (mut runtime, device) = runtime_with_device();
@@ -821,10 +999,11 @@ mod tests {
         let timeline = runtime.create_timeline(&device.id).unwrap();
         let queue = device.queue(WorkloadClass::Transfer).unwrap();
 
-        runtime
-            .driver_mut(&admin_caps())
-            .unwrap()
-            .inject_fault(&device.gpu, 0xdead, "simulated hang");
+        runtime.driver_mut(&admin_caps()).unwrap().inject_fault(
+            &device.gpu,
+            0xdead,
+            "simulated hang",
+        );
         assert!(runtime.device_fault(&device.id).unwrap().is_some());
 
         let stream = runtime
@@ -957,10 +1136,11 @@ mod tests {
             .is_ok());
 
         // A fault on device A must not block submission on device B.
-        runtime
-            .driver_mut(&admin_caps())
-            .unwrap()
-            .inject_fault(&device_a.gpu, 0xbad, "device A hang");
+        runtime.driver_mut(&admin_caps()).unwrap().inject_fault(
+            &device_a.gpu,
+            0xbad,
+            "device A hang",
+        );
         assert!(runtime.device_fault(&device_a.id).unwrap().is_some());
         assert!(runtime.device_fault(&device_b.id).unwrap().is_none());
 

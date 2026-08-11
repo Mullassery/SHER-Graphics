@@ -16,12 +16,13 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full design: philosophy, why 
 
 ## What exists today
 
-Design phase, but unusually testable for one: 51 tests pass with zero GPU hardware in the loop, because `gpu_abstraction::SoftwareGpuDriver` is a hardware-independent reference driver, the same role `llvmpipe`/`lavapipe` play for Mesa (see `ARCHITECTURE.md` section 21).
+Design phase, but unusually testable for one: 57 tests pass with zero GPU hardware in the loop, because `gpu_abstraction::SoftwareGpuDriver` is a hardware-independent reference driver, the same role `llvmpipe`/`lavapipe` play for Mesa (see `ARCHITECTURE.md` section 21).
 
 - Native graphics API: device, resource, pipeline, command-stream, and timeline object model (`graphics_api`)
 - GPU abstraction layer with multi-GPU support and an in-process software reference driver (`gpu_abstraction`)
 - Command-stream validation, GPU fault detection, and isolated per-context fault recovery, so one context's failure doesn't take down others
 - Every capability-gated operation (device creation, submission, admin/recovery) reuses SHER Kernel's existing capability and tier security model, not a graphics-specific one, and every grant/denial flows into an audit trail
+- Cursor rendering primitives (`set_cursor_image`, `set_cursor_position`, `show_cursor`, `hide_cursor`) that own how the cursor is drawn without touching position tracking, focus, or input, which stay in SHER-Input/SHER-Display
 - `cargo run -p graphics_runtime --example triangle` walks the entire stack end to end: device → shaders → pipeline → resource → validated command stream → submit → wait → present
 
 No hardware backend yet; that's the next phase. The roadmap and effort estimate in `ARCHITECTURE.md` section 21 lays out what's realistically implementable first versus what needs research before committing to an approach.

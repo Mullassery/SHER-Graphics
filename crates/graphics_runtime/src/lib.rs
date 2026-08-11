@@ -168,6 +168,10 @@ impl PresentationBridge {
 pub struct GraphicsRuntime<D: GpuDriver> {
     driver: D,
     devices: HashMap<ObjectId, GraphicsDevice>,
+    /// Capabilities granted at `create_device` time, re-checked per operation
+    /// (currently: `GpuCommandSubmit` on `submit`) rather than trusted once
+    /// and forgotten — see ARCHITECTURE.md section 16.
+    device_caps: HashMap<ObjectId, CapabilitySet>,
     resources: HashMap<ObjectId, Resource>,
     shaders: HashMap<ObjectId, ShaderModule>,
     pipelines: HashMap<ObjectId, Pipeline>,
@@ -180,6 +184,7 @@ impl<D: GpuDriver> GraphicsRuntime<D> {
         Self {
             driver,
             devices: HashMap::new(),
+            device_caps: HashMap::new(),
             resources: HashMap::new(),
             shaders: HashMap::new(),
             pipelines: HashMap::new(),
@@ -251,6 +256,7 @@ impl<D: GpuDriver> GraphicsRuntime<D> {
         self.driver.reset_device(&gpu)?;
 
         self.devices.remove(device);
+        self.device_caps.remove(device);
         self.resources.retain(|_, r| &r.device != device);
         self.shaders.retain(|_, s| &s.device != device);
         self.pipelines.retain(|_, p| &p.device != device);
@@ -288,6 +294,7 @@ impl<D: GpuDriver> GraphicsApi for GraphicsRuntime<D> {
             ],
         };
         self.devices.insert(device.id, device.clone());
+        self.device_caps.insert(device.id, caps.clone());
         Ok(device)
     }
 
@@ -384,6 +391,11 @@ impl<D: GpuDriver> GraphicsApi for GraphicsRuntime<D> {
                 "command stream workload class does not match queue".to_string(),
             ));
         }
+        let caps = self
+            .device_caps
+            .get(&stream.device)
+            .ok_or_else(|| Error::Device("unknown graphics device".to_string()))?;
+        graphics_api::require_capability(caps, Capability::GpuCommandSubmit)?;
         let gpu = self.device(&stream.device)?.gpu;
         let current = *self
             .timelines
@@ -440,12 +452,21 @@ mod tests {
         caps
     }
 
+    /// `GpuMemoryAlloc` (required by `create_device`) plus `GpuCommandSubmit`
+    /// (required by `submit`) — the baseline grant most tests need, since
+    /// most tests exercise more than just device creation.
+    fn full_caps() -> CapabilitySet {
+        let mut caps = CapabilitySet::default();
+        caps.grant(Capability::GpuMemoryAlloc, PermissionTier::High);
+        caps.grant(Capability::GpuCommandSubmit, PermissionTier::High);
+        caps
+    }
+
     fn runtime_with_device() -> (GraphicsRuntime<SoftwareGpuDriver>, GraphicsDevice) {
         let driver = SoftwareGpuDriver::new(64 * 1024 * 1024);
         let gpu = driver.device_id();
         let mut runtime = GraphicsRuntime::new(driver, 16 * 1024 * 1024);
-        let caps = caps_with(Capability::GpuMemoryAlloc);
-        let device = runtime.create_device(gpu, &caps).unwrap();
+        let device = runtime.create_device(gpu, &full_caps()).unwrap();
         (runtime, device)
     }
 
@@ -526,6 +547,26 @@ mod tests {
         assert_eq!(runtime.timeline_value(&timeline.id).unwrap(), 1);
         assert!(runtime.wait(&timeline.id, 1).is_ok());
         assert!(runtime.wait(&timeline.id, 2).is_err());
+    }
+
+    #[test]
+    fn submit_requires_gpu_command_submit_capability() {
+        let driver = SoftwareGpuDriver::new(64 * 1024 * 1024);
+        let gpu = driver.device_id();
+        let mut runtime = GraphicsRuntime::new(driver, 1024);
+        // Only GpuMemoryAlloc granted - enough to create the device, not
+        // enough to submit work on it.
+        let device = runtime
+            .create_device(gpu, &caps_with(Capability::GpuMemoryAlloc))
+            .unwrap();
+        let timeline = runtime.create_timeline(&device.id).unwrap();
+        let stream = runtime
+            .create_command_stream(&device.id, WorkloadClass::Graphics)
+            .unwrap();
+        let queue = device.queue(WorkloadClass::Graphics).unwrap();
+
+        let result = runtime.submit(&queue, stream, &timeline.id, 1);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -701,7 +742,9 @@ mod tests {
         let timeline = runtime.create_timeline(&device.id).unwrap();
         let queue = device.queue(WorkloadClass::Transfer).unwrap();
 
-        runtime.driver_mut().inject_fault(0xdead, "simulated hang");
+        runtime
+            .driver_mut()
+            .inject_fault(&device.gpu, 0xdead, "simulated hang");
         assert!(runtime.device_fault(&device.id).unwrap().is_some());
 
         let stream = runtime
@@ -738,7 +781,7 @@ mod tests {
             )
             .unwrap();
 
-        runtime.driver_mut().inject_fault(0x1, "fault");
+        runtime.driver_mut().inject_fault(&device.gpu, 0x1, "fault");
         runtime.recover_device(&device.id).unwrap();
 
         assert!(!runtime.pipelines.contains_key(&pipeline.id));
@@ -750,6 +793,65 @@ mod tests {
     fn recovering_unknown_device_fails() {
         let (mut runtime, _device) = runtime_with_device();
         assert!(runtime.recover_device(&ObjectId::new()).is_err());
+    }
+
+    #[test]
+    fn runtime_supports_two_independent_devices() {
+        let driver = SoftwareGpuDriver::with_devices(2, 4096);
+        let gpu_ids = driver.device_ids();
+        let mut runtime = GraphicsRuntime::new(driver, 1024);
+
+        let device_a = runtime.create_device(gpu_ids[0], &full_caps()).unwrap();
+        let device_b = runtime.create_device(gpu_ids[1], &full_caps()).unwrap();
+        assert_ne!(device_a.id, device_b.id);
+
+        // Exhaust device A's VRAM entirely - device B must be unaffected.
+        runtime
+            .create_resource(
+                &device_a.id,
+                ResourceKind::Buffer {
+                    size: 4096,
+                    usage: BufferUsage::default(),
+                },
+                MemoryClass::DeviceLocal,
+            )
+            .unwrap();
+        assert!(runtime
+            .create_resource(
+                &device_a.id,
+                ResourceKind::Buffer {
+                    size: 1,
+                    usage: BufferUsage::default()
+                },
+                MemoryClass::DeviceLocal,
+            )
+            .is_err());
+        assert!(runtime
+            .create_resource(
+                &device_b.id,
+                ResourceKind::Buffer {
+                    size: 4096,
+                    usage: BufferUsage::default()
+                },
+                MemoryClass::DeviceLocal,
+            )
+            .is_ok());
+
+        // A fault on device A must not block submission on device B.
+        runtime
+            .driver_mut()
+            .inject_fault(&device_a.gpu, 0xbad, "device A hang");
+        assert!(runtime.device_fault(&device_a.id).unwrap().is_some());
+        assert!(runtime.device_fault(&device_b.id).unwrap().is_none());
+
+        let timeline_b = runtime.create_timeline(&device_b.id).unwrap();
+        let stream_b = runtime
+            .create_command_stream(&device_b.id, WorkloadClass::Transfer)
+            .unwrap();
+        let queue_b = device_b.queue(WorkloadClass::Transfer).unwrap();
+        assert!(runtime
+            .submit(&queue_b, stream_b, &timeline_b.id, 1)
+            .is_ok());
     }
 
     #[test]

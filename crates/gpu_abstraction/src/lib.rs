@@ -76,105 +76,155 @@ pub trait GpuDriver: HardwareDriver {
     fn reset_device(&mut self, device: &ObjectId) -> Result<()>;
 }
 
+struct DeviceState {
+    info: DeviceInfo,
+    initialized: bool,
+    vram_total: usize,
+    vram_available: usize,
+    fault: Option<GpuFault>,
+}
+
 /// Reference, hardware-independent implementation. Plays the same role for
 /// SHER Graphics that `llvmpipe`/`lavapipe` play for Mesa: a correctness
 /// baseline that exercises the full stack — `graphics_api` →
 /// `graphics_runtime` → `gpu_abstraction` — with no real GPU behind it.
 /// See ARCHITECTURE.md section 21, "what's realistically implementable
 /// first."
+///
+/// Supports multiple independent synthetic devices (ARCHITECTURE.md section
+/// 17, multi-GPU): each has its own VRAM pool and fault state, keyed by the
+/// `ObjectId` `hal`-style device discovery would assign it. Nothing in
+/// `graphics_runtime` or `graphics_api` assumes a single device — that
+/// assumption lived only here, in the reference driver's original
+/// single-`DeviceInfo` field, now replaced by a device table.
 pub struct SoftwareGpuDriver {
-    device: DeviceInfo,
-    initialized: bool,
-    vram_total: usize,
-    vram_available: usize,
+    devices: HashMap<ObjectId, DeviceState>,
     allocations: HashMap<ObjectId, GpuAllocation>,
-    fault: Option<GpuFault>,
     registers: HashMap<usize, u32>,
 }
 
 impl SoftwareGpuDriver {
+    /// Single-device convenience constructor.
     pub fn new(vram_bytes: usize) -> Self {
-        let device = DeviceInfo {
-            id: ObjectId::new(),
-            device_type: DeviceType::Gpu,
-            name: "SHER Software GPU".to_string(),
-            vendor_id: 0x0000,
-            device_id: 0x0000,
-            capabilities: vec![
-                "graphics".to_string(),
-                "compute".to_string(),
-                "transfer".to_string(),
-            ],
-            mmio_base: None,
-            mmio_size: None,
-            irq: None,
-        };
+        Self::with_devices(1, vram_bytes)
+    }
+
+    /// `count` independent devices, each with its own `vram_bytes_per_device`
+    /// pool. Allocating on one device never affects another's VRAM, and a
+    /// fault on one never blocks submission on another.
+    pub fn with_devices(count: usize, vram_bytes_per_device: usize) -> Self {
+        let mut devices = HashMap::new();
+        for i in 0..count {
+            let info = DeviceInfo {
+                id: ObjectId::new(),
+                device_type: DeviceType::Gpu,
+                name: format!("SHER Software GPU {i}"),
+                vendor_id: 0x0000,
+                device_id: 0x0000,
+                capabilities: vec![
+                    "graphics".to_string(),
+                    "compute".to_string(),
+                    "transfer".to_string(),
+                ],
+                mmio_base: None,
+                mmio_size: None,
+                irq: None,
+            };
+            devices.insert(
+                info.id,
+                DeviceState {
+                    info,
+                    initialized: false,
+                    vram_total: vram_bytes_per_device,
+                    vram_available: vram_bytes_per_device,
+                    fault: None,
+                },
+            );
+        }
         Self {
-            device,
-            initialized: false,
-            vram_total: vram_bytes,
-            vram_available: vram_bytes,
+            devices,
             allocations: HashMap::new(),
-            fault: None,
             registers: HashMap::new(),
         }
     }
 
+    /// The first device's id. Convenience for the common single-device case
+    /// (tests, the `triangle` example); use `device_ids()` when there is
+    /// more than one. Panics if constructed with zero devices.
     pub fn device_id(&self) -> ObjectId {
-        self.device.id
+        *self
+            .devices
+            .keys()
+            .next()
+            .expect("SoftwareGpuDriver constructed with zero devices")
+    }
+
+    pub fn device_ids(&self) -> Vec<ObjectId> {
+        self.devices.keys().copied().collect()
     }
 
     /// Test/diagnostic hook for exercising fault recovery (ARCHITECTURE.md
     /// section 18) without needing real hardware to actually hang.
-    pub fn inject_fault(&mut self, address: u64, description: impl Into<String>) {
-        self.fault = Some(GpuFault {
-            device: self.device.id,
-            address,
-            description: description.into(),
-        });
-    }
-
-    pub fn clear_fault(&mut self) {
-        self.fault = None;
-    }
-
-    fn require_device(&self, device_id: &ObjectId) -> Result<()> {
-        if &self.device.id == device_id {
-            Ok(())
-        } else {
-            Err(Error::Device("unknown GPU device".to_string()))
+    pub fn inject_fault(
+        &mut self,
+        device: &ObjectId,
+        address: u64,
+        description: impl Into<String>,
+    ) {
+        if let Some(state) = self.devices.get_mut(device) {
+            state.fault = Some(GpuFault {
+                device: *device,
+                address,
+                description: description.into(),
+            });
         }
+    }
+
+    pub fn clear_fault(&mut self, device: &ObjectId) {
+        if let Some(state) = self.devices.get_mut(device) {
+            state.fault = None;
+        }
+    }
+
+    fn state(&self, device_id: &ObjectId) -> Result<&DeviceState> {
+        self.devices
+            .get(device_id)
+            .ok_or_else(|| Error::Device("unknown GPU device".to_string()))
+    }
+
+    fn state_mut(&mut self, device_id: &ObjectId) -> Result<&mut DeviceState> {
+        self.devices
+            .get_mut(device_id)
+            .ok_or_else(|| Error::Device("unknown GPU device".to_string()))
     }
 }
 
 impl HardwareDriver for SoftwareGpuDriver {
     fn probe(&self) -> Result<Vec<DeviceInfo>> {
-        Ok(vec![self.device.clone()])
+        Ok(self.devices.values().map(|s| s.info.clone()).collect())
     }
 
     fn initialize(&mut self, device: &DeviceInfo) -> Result<()> {
-        self.require_device(&device.id)?;
-        self.initialized = true;
+        self.state_mut(&device.id)?.initialized = true;
         Ok(())
     }
 
     fn shutdown(&mut self, device_id: &ObjectId) -> Result<()> {
-        self.require_device(device_id)?;
-        self.initialized = false;
+        self.state_mut(device_id)?.initialized = false;
         Ok(())
     }
 
     fn get_capabilities(&self, device_id: &ObjectId) -> Result<Vec<String>> {
-        self.require_device(device_id)?;
-        Ok(self.device.capabilities.clone())
+        Ok(self.state(device_id)?.info.capabilities.clone())
     }
 
     fn read_register(&self, device_id: &ObjectId, offset: usize) -> Result<u32> {
-        self.require_device(device_id)?;
+        self.state(device_id)?;
         Ok(*self.registers.get(&offset).unwrap_or(&0))
     }
 
-    fn write_register(&self, _device_id: &ObjectId, _offset: usize, _value: u32) -> Result<()> {
+    fn write_register(&self, device_id: &ObjectId, _offset: usize, _value: u32) -> Result<()> {
+        self.state(device_id)?;
         // Registers are conceptually mutable hardware state; this reference
         // driver has none to persist, so writes are accepted and discarded.
         Ok(())
@@ -188,8 +238,8 @@ impl GpuDriver for SoftwareGpuDriver {
         size: usize,
         class: MemoryClass,
     ) -> Result<GpuAllocation> {
-        self.require_device(device)?;
-        if size > self.vram_available {
+        let state = self.state_mut(device)?;
+        if size > state.vram_available {
             return Err(Error::Memory("insufficient VRAM".to_string()));
         }
         let allocation = GpuAllocation {
@@ -197,9 +247,9 @@ impl GpuDriver for SoftwareGpuDriver {
             device: *device,
             class,
             size,
-            device_address: (self.vram_total - self.vram_available) as u64,
+            device_address: (state.vram_total - state.vram_available) as u64,
         };
-        self.vram_available -= size;
+        state.vram_available -= size;
         self.allocations.insert(allocation.id, allocation.clone());
         Ok(allocation)
     }
@@ -209,7 +259,7 @@ impl GpuDriver for SoftwareGpuDriver {
             .allocations
             .remove(allocation)
             .ok_or_else(|| Error::Memory("unknown allocation".to_string()))?;
-        self.vram_available += allocation.size;
+        self.state_mut(&allocation.device)?.vram_available += allocation.size;
         Ok(())
     }
 
@@ -226,8 +276,8 @@ impl GpuDriver for SoftwareGpuDriver {
     }
 
     fn submit(&mut self, device: &ObjectId, _class: WorkloadClass, ops: &[DriverOp]) -> Result<()> {
-        self.require_device(device)?;
-        if let Some(fault) = &self.fault {
+        let state = self.state(device)?;
+        if let Some(fault) = &state.fault {
             return Err(Error::Device(format!(
                 "device faulted at {:#x}: {}",
                 fault.address, fault.description
@@ -240,18 +290,15 @@ impl GpuDriver for SoftwareGpuDriver {
     }
 
     fn fault_status(&self, device: &ObjectId) -> Result<Option<GpuFault>> {
-        self.require_device(device)?;
-        Ok(self.fault.clone())
+        Ok(self.state(device)?.fault.clone())
     }
 
     fn vram_available(&self, device: &ObjectId) -> Result<usize> {
-        self.require_device(device)?;
-        Ok(self.vram_available)
+        Ok(self.state(device)?.vram_available)
     }
 
     fn reset_device(&mut self, device: &ObjectId) -> Result<()> {
-        self.require_device(device)?;
-        self.clear_fault();
+        self.state_mut(device)?.fault = None;
         Ok(())
     }
 }
@@ -326,13 +373,13 @@ mod tests {
     fn submit_rejected_while_faulted() {
         let mut driver = SoftwareGpuDriver::new(4096);
         let device_id = driver.device_id();
-        driver.inject_fault(0xdead_beef, "test hang");
+        driver.inject_fault(&device_id, 0xdead_beef, "test hang");
         let ops = vec![DriverOp::Barrier];
         assert!(driver
             .submit(&device_id, WorkloadClass::Compute, &ops)
             .is_err());
 
-        driver.clear_fault();
+        driver.clear_fault(&device_id);
         assert!(driver
             .submit(&device_id, WorkloadClass::Compute, &ops)
             .is_ok());
@@ -344,7 +391,7 @@ mod tests {
         let device_id = driver.device_id();
         assert!(driver.fault_status(&device_id).unwrap().is_none());
 
-        driver.inject_fault(0x1000, "page fault");
+        driver.inject_fault(&device_id, 0x1000, "page fault");
         let fault = driver.fault_status(&device_id).unwrap().unwrap();
         assert_eq!(fault.address, 0x1000);
     }
@@ -353,7 +400,7 @@ mod tests {
     fn reset_device_clears_fault_and_allows_submit() {
         let mut driver = SoftwareGpuDriver::new(4096);
         let device_id = driver.device_id();
-        driver.inject_fault(0xbad, "hang");
+        driver.inject_fault(&device_id, 0xbad, "hang");
         assert!(driver
             .submit(&device_id, WorkloadClass::Graphics, &[])
             .is_err());
@@ -376,5 +423,57 @@ mod tests {
         let driver = SoftwareGpuDriver::new(4096);
         let bogus = ObjectId::new();
         assert!(driver.vram_available(&bogus).is_err());
+    }
+
+    #[test]
+    fn with_devices_creates_the_requested_count() {
+        let driver = SoftwareGpuDriver::with_devices(3, 1024);
+        assert_eq!(driver.device_ids().len(), 3);
+        assert_eq!(driver.probe().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn vram_is_isolated_per_device() {
+        let mut driver = SoftwareGpuDriver::with_devices(2, 1024);
+        let ids = driver.device_ids();
+        let (a, b) = (ids[0], ids[1]);
+
+        driver
+            .allocate_vram(&a, 1024, MemoryClass::DeviceLocal)
+            .unwrap();
+        assert_eq!(driver.vram_available(&a).unwrap(), 0);
+        assert_eq!(driver.vram_available(&b).unwrap(), 1024);
+
+        // Allocating the full pool on device A must not affect device B.
+        assert!(driver
+            .allocate_vram(&b, 1024, MemoryClass::DeviceLocal)
+            .is_ok());
+    }
+
+    #[test]
+    fn fault_is_isolated_per_device() {
+        let mut driver = SoftwareGpuDriver::with_devices(2, 1024);
+        let ids = driver.device_ids();
+        let (a, b) = (ids[0], ids[1]);
+
+        driver.inject_fault(&a, 0xdead, "device A hang");
+        assert!(driver.submit(&a, WorkloadClass::Graphics, &[]).is_err());
+        assert!(driver.submit(&b, WorkloadClass::Graphics, &[]).is_ok());
+        assert!(driver.fault_status(&b).unwrap().is_none());
+    }
+
+    #[test]
+    fn freeing_allocation_credits_the_correct_device() {
+        let mut driver = SoftwareGpuDriver::with_devices(2, 1024);
+        let ids = driver.device_ids();
+        let (a, b) = (ids[0], ids[1]);
+
+        let alloc = driver
+            .allocate_vram(&a, 512, MemoryClass::HostVisible)
+            .unwrap();
+        driver.free_vram(&alloc.id).unwrap();
+
+        assert_eq!(driver.vram_available(&a).unwrap(), 1024);
+        assert_eq!(driver.vram_available(&b).unwrap(), 1024);
     }
 }

@@ -12,7 +12,7 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full design: philosophy, why 
 
 ## Status
 
-Design phase. Crate skeletons exist, compile, and pass 42 tests; no hardware backend yet. `gpu_abstraction::SoftwareGpuDriver` is a hardware-independent reference driver — the whole stack runs and tests without a GPU, the same role `llvmpipe`/`lavapipe` play for Mesa (see `ARCHITECTURE.md` section 21). `cargo run -p graphics_runtime --example triangle` walks the full path end to end: device → shaders → pipeline → resource → validated command stream → submit → wait → present.
+Design phase. Crate skeletons exist, compile, and pass 49 tests; no hardware backend yet. `gpu_abstraction::SoftwareGpuDriver` is a hardware-independent reference driver — the whole stack runs and tests without a GPU, the same role `llvmpipe`/`lavapipe` play for Mesa (see `ARCHITECTURE.md` section 21). `cargo run -p graphics_runtime --example triangle` walks the full path end to end: device → shaders → pipeline → resource → validated command stream → submit → wait → present.
 
 ## Workspace
 

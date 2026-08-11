@@ -246,12 +246,21 @@ impl<D: GpuDriver> GraphicsRuntime<D> {
     /// pipelines that belonged to it are dropped along with it, since
     /// their validity was tied to a context that no longer exists.
     ///
+    /// Gated on `Capability::GpuAdmin` — ARCHITECTURE.md section 16 lists
+    /// "fault-recovery triggers" explicitly as a `GpuAdmin` (Tier 4,
+    /// Critical) operation, distinct from the `GpuMemoryAlloc`/
+    /// `GpuCommandSubmit` capabilities regular device users hold. Checked
+    /// against the capability set the *caller* presents now, not the set
+    /// the faulted device was created with — an app's own crashed context
+    /// should not be recoverable by the app itself.
+    ///
     /// Timelines are not yet torn down here — the timeline table only
     /// tracks id → current value, not which device created it. A timeline
     /// belonging to a recovered device simply stops advancing (its
     /// `device` no longer resolves), rather than being explicitly freed;
     /// tracked as follow-up work alongside a real timeline registry.
-    pub fn recover_device(&mut self, device: &ObjectId) -> Result<()> {
+    pub fn recover_device(&mut self, device: &ObjectId, caps: &CapabilitySet) -> Result<()> {
+        graphics_api::require_capability(caps, Capability::GpuAdmin)?;
         let gpu = self.device(device)?.gpu;
         self.driver.reset_device(&gpu)?;
 
@@ -460,6 +469,14 @@ mod tests {
         caps.grant(Capability::GpuMemoryAlloc, PermissionTier::High);
         caps.grant(Capability::GpuCommandSubmit, PermissionTier::High);
         caps
+    }
+
+    /// `GpuAdmin` only — deliberately *not* combined with `full_caps()`, so
+    /// tests that exercise `recover_device` prove the admin grant is what's
+    /// authorizing recovery, not incidental possession of the regular
+    /// device-user capabilities.
+    fn admin_caps() -> CapabilitySet {
+        caps_with(Capability::GpuAdmin)
     }
 
     fn runtime_with_device() -> (GraphicsRuntime<SoftwareGpuDriver>, GraphicsDevice) {
@@ -753,7 +770,7 @@ mod tests {
         let result = runtime.submit(&queue, stream, &timeline.id, 1);
         assert!(result.is_err());
 
-        runtime.recover_device(&device.id).unwrap();
+        runtime.recover_device(&device.id, &admin_caps()).unwrap();
 
         // The faulting context was torn down, not resumed: the old device
         // id is no longer valid, matching ARCHITECTURE.md section 18.
@@ -782,7 +799,7 @@ mod tests {
             .unwrap();
 
         runtime.driver_mut().inject_fault(&device.gpu, 0x1, "fault");
-        runtime.recover_device(&device.id).unwrap();
+        runtime.recover_device(&device.id, &admin_caps()).unwrap();
 
         assert!(!runtime.pipelines.contains_key(&pipeline.id));
         assert!(!runtime.shaders.contains_key(&shader.id));
@@ -792,7 +809,28 @@ mod tests {
     #[test]
     fn recovering_unknown_device_fails() {
         let (mut runtime, _device) = runtime_with_device();
-        assert!(runtime.recover_device(&ObjectId::new()).is_err());
+        assert!(runtime
+            .recover_device(&ObjectId::new(), &admin_caps())
+            .is_err());
+    }
+
+    #[test]
+    fn recover_device_requires_gpu_admin_capability() {
+        let (mut runtime, device) = runtime_with_device();
+        runtime.driver_mut().inject_fault(&device.gpu, 0x1, "fault");
+
+        // `full_caps()` grants `GpuMemoryAlloc` + `GpuCommandSubmit` — the
+        // capabilities an ordinary device user holds — but not `GpuAdmin`,
+        // so a faulted app's own context is not self-recoverable.
+        let result = runtime.recover_device(&device.id, &full_caps());
+        assert!(result.is_err());
+
+        // The device is still faulted and was not torn down by the
+        // rejected call.
+        assert!(runtime.device_fault(&device.id).unwrap().is_some());
+
+        runtime.recover_device(&device.id, &admin_caps()).unwrap();
+        assert!(runtime.device(&device.id).is_err());
     }
 
     #[test]

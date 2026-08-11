@@ -1,0 +1,13 @@
+[package]
+name = "gpu_abstraction"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SHER GPU Abstraction Layer - GpuDriver trait extending hal::HardwareDriver with VRAM, DMA, submission, and fault primitives"
+
+[dependencies]
+sher_common = { workspace = true }
+graphics_api = { path = "../graphics_api" }
+hal = { workspace = true }

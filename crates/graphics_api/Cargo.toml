@@ -1,0 +1,12 @@
+[package]
+name = "graphics_api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native SHER Graphics API - application-facing object model for GPU resources, command submission, and synchronization"
+
+[dependencies]
+sher_common = { workspace = true }
+sher_objectmodel = { workspace = true }

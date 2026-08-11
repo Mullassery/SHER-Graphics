@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "crates/graphics_api",
+    "crates/gpu_abstraction",
+    "crates/graphics_runtime",
+    "crates/graphics_compat",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Georgi Mammen Mullassery <mullassery@gmail.com>"]
+license = "Proprietary License — Free to use with explicit attribution"
+repository = "https://github.com/Mullassery/SHER-Graphics"
+
+[workspace.dependencies]
+sher_common = { path = "../SHER-Kernel/crates/common" }
+sher_objectmodel = { path = "../SHER-Kernel/crates/objectmodel" }
+hal = { path = "../SHER-Kernel/crates/hal" }
+gpu_driver = { path = "../SHER-Kernel/crates/gpu_driver" }

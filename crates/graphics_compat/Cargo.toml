@@ -1,0 +1,15 @@
+[package]
+name = "graphics_compat"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Mesa compatibility seam: the DRM-ioctl-compatible shim (Phase A) that lets an unmodified Mesa winsys/WSI talk to SHER Graphics"
+
+[dependencies]
+sher_common = { workspace = true }
+sher_objectmodel = { workspace = true }
+graphics_api = { path = "../graphics_api" }
+gpu_abstraction = { path = "../gpu_abstraction" }
+graphics_runtime = { path = "../graphics_runtime" }

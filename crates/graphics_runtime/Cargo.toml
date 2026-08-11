@@ -1,0 +1,16 @@
+[package]
+name = "graphics_runtime"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SHER Graphics Runtime - implements graphics_api::GraphicsApi, orchestrating resource tracking, memory, command submission, and presentation on top of a GpuDriver"
+
+[dependencies]
+sher_common = { workspace = true }
+sher_objectmodel = { workspace = true }
+graphics_api = { path = "../graphics_api" }
+gpu_abstraction = { path = "../gpu_abstraction" }
+hal = { workspace = true }
+gpu_driver = { workspace = true }

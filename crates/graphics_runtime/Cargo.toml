@@ -10,6 +10,7 @@ description = "SHER Graphics Runtime - implements graphics_api::GraphicsApi, orc
 [dependencies]
 sher_common = { workspace = true }
 sher_objectmodel = { workspace = true }
+sher_security = { workspace = true }
 graphics_api = { path = "../graphics_api" }
 gpu_abstraction = { path = "../gpu_abstraction" }
 hal = { workspace = true }

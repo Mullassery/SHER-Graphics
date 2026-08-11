@@ -20,6 +20,7 @@ use graphics_api::{
 };
 use sher_common::{Capability, Error, ObjectId, Result};
 use sher_objectmodel::CapabilitySet;
+use sher_security::audit::AuditLog;
 use std::collections::HashMap;
 
 fn bytes_per_pixel(format: PixelFormat) -> usize {
@@ -177,6 +178,20 @@ pub struct GraphicsRuntime<D: GpuDriver> {
     pipelines: HashMap<ObjectId, Pipeline>,
     timelines: HashMap<ObjectId, u64>,
     presentation: PresentationBridge,
+    /// Reuses `sher_security`'s `AuditLog`/`AuditEvent` pattern, per
+    /// ARCHITECTURE.md section 16 ("GPU capability grants, submissions from
+    /// unusual contexts, and fault events all flow into the same audit
+    /// trail"). Covers `create_device` (capability grant check),
+    /// `submit` (per-submission authorization), and `recover_device`
+    /// (fault-recovery trigger).
+    ///
+    /// `AuditEvent::actor` is the device/GPU `ObjectId` being acted on, not
+    /// the calling process — `GraphicsApi` doesn't yet receive a caller
+    /// identity (`CapabilitySet` carries grants but no owning `ObjectId`),
+    /// so there is no true actor to record. Attributing the process that
+    /// presented `caps` is tracked as follow-up work alongside that
+    /// upstream gap.
+    audit: AuditLog,
 }
 
 impl<D: GpuDriver> GraphicsRuntime<D> {
@@ -190,7 +205,15 @@ impl<D: GpuDriver> GraphicsRuntime<D> {
             pipelines: HashMap::new(),
             timelines: HashMap::new(),
             presentation: PresentationBridge::new(presentation_vram_bytes),
+            audit: AuditLog::default(),
         }
+    }
+
+    /// Read access to the audit trail — the foundation `sher-graphics-monitor`
+    /// (ARCHITECTURE.md section 32) would query for capability-denial and
+    /// fault-recovery history.
+    pub fn audit_log(&self) -> &AuditLog {
+        &self.audit
     }
 
     fn device(&self, id: &ObjectId) -> Result<&GraphicsDevice> {
@@ -263,7 +286,9 @@ impl<D: GpuDriver> GraphicsRuntime<D> {
     /// `device` no longer resolves), rather than being explicitly freed;
     /// tracked as follow-up work alongside a real timeline registry.
     pub fn recover_device(&mut self, device: &ObjectId, caps: &CapabilitySet) -> Result<()> {
-        graphics_api::require_capability(caps, Capability::GpuAdmin)?;
+        let authorized = graphics_api::require_capability(caps, Capability::GpuAdmin);
+        self.audit.log(*device, "recover_device", authorized.is_ok());
+        authorized?;
         let gpu = self.device(device)?.gpu;
         self.driver.reset_device(&gpu)?;
 
@@ -278,7 +303,9 @@ impl<D: GpuDriver> GraphicsRuntime<D> {
 
 impl<D: GpuDriver> GraphicsApi for GraphicsRuntime<D> {
     fn create_device(&mut self, gpu: ObjectId, caps: &CapabilitySet) -> Result<GraphicsDevice> {
-        graphics_api::require_capability(caps, Capability::GpuMemoryAlloc)?;
+        let authorized = graphics_api::require_capability(caps, Capability::GpuMemoryAlloc);
+        self.audit.log(gpu, "create_device", authorized.is_ok());
+        authorized?;
 
         let known = self.driver.probe()?;
         let device_info = known
@@ -407,7 +434,9 @@ impl<D: GpuDriver> GraphicsApi for GraphicsRuntime<D> {
             .device_caps
             .get(&stream.device)
             .ok_or_else(|| Error::Device("unknown graphics device".to_string()))?;
-        graphics_api::require_capability(caps, Capability::GpuCommandSubmit)?;
+        let authorized = graphics_api::require_capability(caps, Capability::GpuCommandSubmit);
+        self.audit.log(stream.device, "submit", authorized.is_ok());
+        authorized?;
         let gpu = self.device(&stream.device)?.gpu;
         let current = *self
             .timelines
@@ -497,6 +526,11 @@ mod tests {
         let mut runtime = GraphicsRuntime::new(driver, 1024);
         let result = runtime.create_device(gpu, &CapabilitySet::default());
         assert!(result.is_err());
+
+        let entry = runtime.audit_log().events.last().unwrap();
+        assert_eq!(entry.actor, gpu);
+        assert_eq!(entry.action, "create_device");
+        assert!(!entry.result);
     }
 
     #[test]
@@ -587,6 +621,31 @@ mod tests {
 
         let result = runtime.submit(&queue, stream, &timeline.id, 1);
         assert!(result.is_err());
+
+        let entry = runtime.audit_log().events.last().unwrap();
+        assert_eq!(entry.actor, device.id);
+        assert_eq!(entry.action, "submit");
+        assert!(!entry.result);
+    }
+
+    #[test]
+    fn audit_log_records_authorized_and_denied_gpu_admin_operations() {
+        let (mut runtime, device) = runtime_with_device();
+
+        // Denied: full_caps() lacks GpuAdmin.
+        assert!(runtime.recover_device(&device.id, &full_caps()).is_err());
+        // Authorized: admin_caps() grants it.
+        runtime.recover_device(&device.id, &admin_caps()).unwrap();
+
+        let events = &runtime.audit_log().events;
+        let recover_events: Vec<_> = events
+            .iter()
+            .filter(|e| e.action == "recover_device")
+            .collect();
+        assert_eq!(recover_events.len(), 2);
+        assert!(!recover_events[0].result);
+        assert!(recover_events[1].result);
+        assert!(recover_events.iter().all(|e| e.actor == device.id));
     }
 
     #[test]

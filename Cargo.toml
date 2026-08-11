@@ -17,5 +17,6 @@ repository = "https://github.com/Mullassery/SHER-Graphics"
 [workspace.dependencies]
 sher_common = { path = "../SHER-Kernel/crates/common" }
 sher_objectmodel = { path = "../SHER-Kernel/crates/objectmodel" }
+sher_security = { path = "../SHER-Kernel/crates/security" }
 hal = { path = "../SHER-Kernel/crates/hal" }
 gpu_driver = { path = "../SHER-Kernel/crates/gpu_driver" }

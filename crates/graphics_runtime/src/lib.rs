@@ -220,11 +220,14 @@ impl<D: GpuDriver> GraphicsRuntime<D> {
     }
 
     /// Escape hatch to the underlying driver, for test/debug hooks
-    /// (`SoftwareGpuDriver::inject_fault`) and future admin tooling gated by
-    /// `Capability::GpuAdmin`. Not part of `GraphicsApi` — the portable API
-    /// surface never needs driver-specific methods.
-    pub fn driver_mut(&mut self) -> &mut D {
-        &mut self.driver
+    /// (`SoftwareGpuDriver::inject_fault`) and admin tooling (driver reload,
+    /// power-state changes) named alongside fault recovery under
+    /// `Capability::GpuAdmin` in ARCHITECTURE.md section 16. Not part of
+    /// `GraphicsApi` — the portable API surface never needs driver-specific
+    /// methods; this is deliberately a separate, narrower door.
+    pub fn driver_mut(&mut self, caps: &CapabilitySet) -> Result<&mut D> {
+        graphics_api::require_capability(caps, Capability::GpuAdmin)?;
+        Ok(&mut self.driver)
     }
 
     /// Reports whether the GPU backing `device` has faulted. See
@@ -760,7 +763,8 @@ mod tests {
         let queue = device.queue(WorkloadClass::Transfer).unwrap();
 
         runtime
-            .driver_mut()
+            .driver_mut(&admin_caps())
+            .unwrap()
             .inject_fault(&device.gpu, 0xdead, "simulated hang");
         assert!(runtime.device_fault(&device.id).unwrap().is_some());
 
@@ -798,7 +802,10 @@ mod tests {
             )
             .unwrap();
 
-        runtime.driver_mut().inject_fault(&device.gpu, 0x1, "fault");
+        runtime
+            .driver_mut(&admin_caps())
+            .unwrap()
+            .inject_fault(&device.gpu, 0x1, "fault");
         runtime.recover_device(&device.id, &admin_caps()).unwrap();
 
         assert!(!runtime.pipelines.contains_key(&pipeline.id));
@@ -815,9 +822,24 @@ mod tests {
     }
 
     #[test]
+    fn driver_mut_requires_gpu_admin_capability() {
+        let (mut runtime, _device) = runtime_with_device();
+
+        // `full_caps()` is what an ordinary device user holds
+        // (GpuMemoryAlloc + GpuCommandSubmit) — the driver escape hatch is
+        // narrower than that, matching ARCHITECTURE.md section 16's
+        // GpuAdmin/Tier 4 gate on driver-level admin operations.
+        assert!(runtime.driver_mut(&full_caps()).is_err());
+        assert!(runtime.driver_mut(&admin_caps()).is_ok());
+    }
+
+    #[test]
     fn recover_device_requires_gpu_admin_capability() {
         let (mut runtime, device) = runtime_with_device();
-        runtime.driver_mut().inject_fault(&device.gpu, 0x1, "fault");
+        runtime
+            .driver_mut(&admin_caps())
+            .unwrap()
+            .inject_fault(&device.gpu, 0x1, "fault");
 
         // `full_caps()` grants `GpuMemoryAlloc` + `GpuCommandSubmit` — the
         // capabilities an ordinary device user holds — but not `GpuAdmin`,
@@ -877,7 +899,8 @@ mod tests {
 
         // A fault on device A must not block submission on device B.
         runtime
-            .driver_mut()
+            .driver_mut(&admin_caps())
+            .unwrap()
             .inject_fault(&device_a.gpu, 0xbad, "device A hang");
         assert!(runtime.device_fault(&device_a.id).unwrap().is_some());
         assert!(runtime.device_fault(&device_b.id).unwrap().is_none());

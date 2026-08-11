@@ -11,13 +11,13 @@
 //! (`graphics_api`) and the compatibility boundary (Mesa / `graphics_compat`),
 //! not here.
 
-use gpu_abstraction::{DriverOp, GpuDriver};
+use gpu_abstraction::{DriverOp, GpuDriver, GpuFault};
 use gpu_driver::{Connector, GPUDriver};
+pub use graphics_api::MemoryClass;
 use graphics_api::{
     CommandStream, GraphicsApi, GraphicsDevice, GraphicsOp, Pipeline, PixelFormat, QueueHandle,
     Resource, ResourceKind, ShaderModule, ShaderStage, Timeline, WorkloadClass,
 };
-pub use graphics_api::MemoryClass;
 use sher_common::{Capability, Error, ObjectId, Result};
 use sher_objectmodel::CapabilitySet;
 use std::collections::HashMap;
@@ -33,25 +33,97 @@ fn bytes_per_pixel(format: PixelFormat) -> usize {
 fn resource_size(kind: &ResourceKind) -> usize {
     match kind {
         ResourceKind::Buffer { size, .. } => *size,
-        ResourceKind::Image { width, height, depth, format, .. } => {
-            (*width as usize) * (*height as usize) * (*depth as usize) * bytes_per_pixel(*format)
+        ResourceKind::Image {
+            width,
+            height,
+            depth,
+            format,
+            ..
+        } => (*width as usize) * (*height as usize) * (*depth as usize) * bytes_per_pixel(*format),
+    }
+}
+
+/// Validates a command stream's binding state before it reaches the driver:
+/// every `BindPipeline`/`BindResource` must reference a live object on the
+/// same device, and `Draw`/`Dispatch` must be preceded by a `BindPipeline`.
+/// This is where "the runtime decides the on-hardware binding-table
+/// representation" (ARCHITECTURE.md section 3) starts — a real backend
+/// would additionally compile this binding state into hardware descriptor
+/// tables here, rather than passing it through.
+fn validate_stream(
+    stream: &CommandStream,
+    pipelines: &HashMap<ObjectId, Pipeline>,
+    resources: &HashMap<ObjectId, Resource>,
+) -> Result<()> {
+    let mut bound_pipeline: Option<ObjectId> = None;
+    for op in &stream.ops {
+        match op {
+            GraphicsOp::BindPipeline(pipeline_id) => {
+                let pipeline = pipelines.get(pipeline_id).ok_or_else(|| {
+                    Error::Device("BindPipeline references unknown pipeline".to_string())
+                })?;
+                if pipeline.device != stream.device {
+                    return Err(Error::Device(
+                        "BindPipeline references a pipeline from a different device".to_string(),
+                    ));
+                }
+                bound_pipeline = Some(*pipeline_id);
+            }
+            GraphicsOp::BindResource { resource, .. } => {
+                let res = resources.get(resource).ok_or_else(|| {
+                    Error::Device("BindResource references unknown resource".to_string())
+                })?;
+                if res.device != stream.device {
+                    return Err(Error::Device(
+                        "BindResource references a resource from a different device".to_string(),
+                    ));
+                }
+            }
+            GraphicsOp::Draw { .. } | GraphicsOp::Dispatch { .. } => {
+                if bound_pipeline.is_none() {
+                    return Err(Error::Device(
+                        "Draw/Dispatch issued without a bound pipeline".to_string(),
+                    ));
+                }
+            }
+            GraphicsOp::Copy { src, dst } => {
+                if !resources.contains_key(src) || !resources.contains_key(dst) {
+                    return Err(Error::Device(
+                        "Copy references unknown resource".to_string(),
+                    ));
+                }
+            }
+            GraphicsOp::Barrier => {}
         }
     }
+    Ok(())
 }
 
 /// Narrows the app-facing `GraphicsOp` vocabulary down to what a driver
 /// backend actually executes. `BindPipeline`/`BindResource` are runtime-side
 /// state changes, not driver-level commands, so they don't cross this
-/// boundary — see `gpu_abstraction::DriverOp` module docs.
+/// boundary — see `gpu_abstraction::DriverOp` module docs. By the time
+/// `translate_ops` runs, `validate_stream` has already confirmed every
+/// binding was valid.
 fn translate_ops(ops: &[GraphicsOp]) -> Vec<DriverOp> {
     ops.iter()
         .filter_map(|op| match op {
-            GraphicsOp::Draw { vertex_count, instance_count } => Some(DriverOp::Draw {
+            GraphicsOp::Draw {
+                vertex_count,
+                instance_count,
+            } => Some(DriverOp::Draw {
                 vertex_count: *vertex_count,
                 instance_count: *instance_count,
             }),
-            GraphicsOp::Dispatch { x, y, z } => Some(DriverOp::Dispatch { x: *x, y: *y, z: *z }),
-            GraphicsOp::Copy { src, dst } => Some(DriverOp::Copy { src: *src, dst: *dst }),
+            GraphicsOp::Dispatch { x, y, z } => Some(DriverOp::Dispatch {
+                x: *x,
+                y: *y,
+                z: *z,
+            }),
+            GraphicsOp::Copy { src, dst } => Some(DriverOp::Copy {
+                src: *src,
+                dst: *dst,
+            }),
             GraphicsOp::Barrier => Some(DriverOp::Barrier),
             GraphicsOp::BindPipeline(_) | GraphicsOp::BindResource { .. } => None,
         })
@@ -72,14 +144,21 @@ pub struct PresentationBridge {
 
 impl PresentationBridge {
     pub fn new(display_vram_bytes: usize) -> Self {
-        Self { display: GPUDriver::new(display_vram_bytes) }
+        Self {
+            display: GPUDriver::new(display_vram_bytes),
+        }
     }
 
     pub fn register_connector(&mut self, connector: Connector) -> Result<()> {
         self.display.register_connector(connector)
     }
 
-    pub fn present(&mut self, connector_id: &ObjectId, width: u32, height: u32) -> Result<ObjectId> {
+    pub fn present(
+        &mut self,
+        connector_id: &ObjectId,
+        width: u32,
+        height: u32,
+    ) -> Result<ObjectId> {
         let framebuffer = self.display.allocate_framebuffer(width, height)?;
         self.display.page_flip(connector_id, &framebuffer.id)?;
         Ok(framebuffer.id)
@@ -126,8 +205,56 @@ impl<D: GpuDriver> GraphicsRuntime<D> {
         self.presentation.register_connector(connector)
     }
 
-    pub fn present_frame(&mut self, connector: &ObjectId, width: u32, height: u32) -> Result<ObjectId> {
+    pub fn present_frame(
+        &mut self,
+        connector: &ObjectId,
+        width: u32,
+        height: u32,
+    ) -> Result<ObjectId> {
         self.presentation.present(connector, width, height)
+    }
+
+    /// Escape hatch to the underlying driver, for test/debug hooks
+    /// (`SoftwareGpuDriver::inject_fault`) and future admin tooling gated by
+    /// `Capability::GpuAdmin`. Not part of `GraphicsApi` — the portable API
+    /// surface never needs driver-specific methods.
+    pub fn driver_mut(&mut self) -> &mut D {
+        &mut self.driver
+    }
+
+    /// Reports whether the GPU backing `device` has faulted. See
+    /// ARCHITECTURE.md section 18: faults surface through the normal
+    /// `Result`/`Error` channel on `submit`, but this lets callers poll
+    /// state without attempting a submission first.
+    pub fn device_fault(&self, device: &ObjectId) -> Result<Option<GpuFault>> {
+        let gpu = self.device(device)?.gpu;
+        self.driver.fault_status(&gpu)
+    }
+
+    /// Recovers from a GPU fault by isolating and tearing down *only* the
+    /// faulting context — matching the kernel-wide "one driver's failure
+    /// doesn't crash others" principle (ARCHITECTURE.md section 18). The
+    /// underlying GPU is reset at the driver level, and the runtime-level
+    /// `GraphicsDevice` is discarded: its id becomes invalid for further
+    /// calls, so callers must `create_device` again rather than resume the
+    /// faulted context as if nothing happened. Resources, shaders, and
+    /// pipelines that belonged to it are dropped along with it, since
+    /// their validity was tied to a context that no longer exists.
+    ///
+    /// Timelines are not yet torn down here — the timeline table only
+    /// tracks id → current value, not which device created it. A timeline
+    /// belonging to a recovered device simply stops advancing (its
+    /// `device` no longer resolves), rather than being explicitly freed;
+    /// tracked as follow-up work alongside a real timeline registry.
+    pub fn recover_device(&mut self, device: &ObjectId) -> Result<()> {
+        let gpu = self.device(device)?.gpu;
+        self.driver.reset_device(&gpu)?;
+
+        self.devices.remove(device);
+        self.resources.retain(|_, r| &r.device != device);
+        self.shaders.retain(|_, s| &s.device != device);
+        self.pipelines.retain(|_, p| &p.device != device);
+        Ok(())
     }
 }
 
@@ -146,9 +273,18 @@ impl<D: GpuDriver> GraphicsApi for GraphicsRuntime<D> {
             id: ObjectId::new(),
             gpu,
             queues: vec![
-                QueueHandle { id: ObjectId::new(), class: WorkloadClass::Graphics },
-                QueueHandle { id: ObjectId::new(), class: WorkloadClass::Compute },
-                QueueHandle { id: ObjectId::new(), class: WorkloadClass::Transfer },
+                QueueHandle {
+                    id: ObjectId::new(),
+                    class: WorkloadClass::Graphics,
+                },
+                QueueHandle {
+                    id: ObjectId::new(),
+                    class: WorkloadClass::Compute,
+                },
+                QueueHandle {
+                    id: ObjectId::new(),
+                    class: WorkloadClass::Transfer,
+                },
             ],
         };
         self.devices.insert(device.id, device.clone());
@@ -157,7 +293,11 @@ impl<D: GpuDriver> GraphicsApi for GraphicsRuntime<D> {
 
     fn create_timeline(&mut self, device: &ObjectId) -> Result<Timeline> {
         self.device(device)?;
-        let timeline = Timeline { id: ObjectId::new(), device: *device, current_value: 0 };
+        let timeline = Timeline {
+            id: ObjectId::new(),
+            device: *device,
+            current_value: 0,
+        };
         self.timelines.insert(timeline.id, 0);
         Ok(timeline)
     }
@@ -171,7 +311,12 @@ impl<D: GpuDriver> GraphicsApi for GraphicsRuntime<D> {
         let gpu = self.device(device)?.gpu;
         let size = resource_size(&kind);
         let allocation = self.driver.allocate_vram(&gpu, size, memory_class)?;
-        let resource = Resource { id: allocation.id, device: *device, kind, memory_class };
+        let resource = Resource {
+            id: allocation.id,
+            device: *device,
+            kind,
+            memory_class,
+        };
         self.resources.insert(resource.id, resource.clone());
         Ok(resource)
     }
@@ -182,7 +327,12 @@ impl<D: GpuDriver> GraphicsApi for GraphicsRuntime<D> {
         class: WorkloadClass,
     ) -> Result<CommandStream> {
         self.device(device)?;
-        Ok(CommandStream { id: ObjectId::new(), device: *device, target_class: class, ops: Vec::new() })
+        Ok(CommandStream {
+            id: ObjectId::new(),
+            device: *device,
+            target_class: class,
+            ops: Vec::new(),
+        })
     }
 
     fn create_shader_module(
@@ -192,7 +342,12 @@ impl<D: GpuDriver> GraphicsApi for GraphicsRuntime<D> {
         ir: Vec<u8>,
     ) -> Result<ShaderModule> {
         self.device(device)?;
-        let module = ShaderModule { id: ObjectId::new(), device: *device, stage, ir };
+        let module = ShaderModule {
+            id: ObjectId::new(),
+            device: *device,
+            stage,
+            ir,
+        };
         self.shaders.insert(module.id, module.clone());
         Ok(module)
     }
@@ -207,7 +362,12 @@ impl<D: GpuDriver> GraphicsApi for GraphicsRuntime<D> {
         if !self.shaders.contains_key(shader) {
             return Err(Error::Device("unknown shader module".to_string()));
         }
-        let pipeline = Pipeline { id: ObjectId::new(), device: *device, class, shader: *shader };
+        let pipeline = Pipeline {
+            id: ObjectId::new(),
+            device: *device,
+            class,
+            shader: *shader,
+        };
         self.pipelines.insert(pipeline.id, pipeline.clone());
         Ok(pipeline)
     }
@@ -234,6 +394,7 @@ impl<D: GpuDriver> GraphicsApi for GraphicsRuntime<D> {
                 "timeline signal value must be strictly increasing".to_string(),
             ));
         }
+        validate_stream(&stream, &self.pipelines, &self.resources)?;
 
         let driver_ops = translate_ops(&stream.ops);
         self.driver.submit(&gpu, queue.class, &driver_ops)?;
@@ -320,7 +481,10 @@ mod tests {
         let resource = runtime
             .create_resource(
                 &device.id,
-                ResourceKind::Buffer { size: 4096, usage: BufferUsage::default() },
+                ResourceKind::Buffer {
+                    size: 4096,
+                    usage: BufferUsage::default(),
+                },
                 MemoryClass::HostVisible,
             )
             .unwrap();
@@ -340,7 +504,10 @@ mod tests {
 
         let result = runtime.create_resource(
             &device.id,
-            ResourceKind::Buffer { size: 4096, usage: BufferUsage::default() },
+            ResourceKind::Buffer {
+                size: 4096,
+                usage: BufferUsage::default(),
+            },
             MemoryClass::DeviceLocal,
         );
         assert!(result.is_err());
@@ -350,7 +517,9 @@ mod tests {
     fn submit_advances_timeline() {
         let (mut runtime, device) = runtime_with_device();
         let timeline = runtime.create_timeline(&device.id).unwrap();
-        let stream = runtime.create_command_stream(&device.id, WorkloadClass::Graphics).unwrap();
+        let stream = runtime
+            .create_command_stream(&device.id, WorkloadClass::Graphics)
+            .unwrap();
         let queue = device.queue(WorkloadClass::Graphics).unwrap();
 
         runtime.submit(&queue, stream, &timeline.id, 1).unwrap();
@@ -363,7 +532,9 @@ mod tests {
     fn submit_rejects_mismatched_workload_class() {
         let (mut runtime, device) = runtime_with_device();
         let timeline = runtime.create_timeline(&device.id).unwrap();
-        let stream = runtime.create_command_stream(&device.id, WorkloadClass::Compute).unwrap();
+        let stream = runtime
+            .create_command_stream(&device.id, WorkloadClass::Compute)
+            .unwrap();
         let queue = device.queue(WorkloadClass::Graphics).unwrap();
 
         let result = runtime.submit(&queue, stream, &timeline.id, 1);
@@ -376,10 +547,14 @@ mod tests {
         let timeline = runtime.create_timeline(&device.id).unwrap();
         let queue = device.queue(WorkloadClass::Transfer).unwrap();
 
-        let first = runtime.create_command_stream(&device.id, WorkloadClass::Transfer).unwrap();
+        let first = runtime
+            .create_command_stream(&device.id, WorkloadClass::Transfer)
+            .unwrap();
         runtime.submit(&queue, first, &timeline.id, 5).unwrap();
 
-        let second = runtime.create_command_stream(&device.id, WorkloadClass::Transfer).unwrap();
+        let second = runtime
+            .create_command_stream(&device.id, WorkloadClass::Transfer)
+            .unwrap();
         let result = runtime.submit(&queue, second, &timeline.id, 5);
         assert!(result.is_err());
     }
@@ -422,12 +597,171 @@ mod tests {
     }
 
     #[test]
+    fn submit_rejects_draw_without_bound_pipeline() {
+        let (mut runtime, device) = runtime_with_device();
+        let timeline = runtime.create_timeline(&device.id).unwrap();
+        let queue = device.queue(WorkloadClass::Graphics).unwrap();
+
+        let mut stream = runtime
+            .create_command_stream(&device.id, WorkloadClass::Graphics)
+            .unwrap();
+        stream.push(GraphicsOp::Draw {
+            vertex_count: 3,
+            instance_count: 1,
+        });
+
+        let result = runtime.submit(&queue, stream, &timeline.id, 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn submit_accepts_draw_after_bind_pipeline() {
+        let (mut runtime, device) = runtime_with_device();
+        let timeline = runtime.create_timeline(&device.id).unwrap();
+        let queue = device.queue(WorkloadClass::Graphics).unwrap();
+        let shader = runtime
+            .create_shader_module(&device.id, ShaderStage::Vertex, vec![0u8; 4])
+            .unwrap();
+        let pipeline = runtime
+            .create_pipeline(&device.id, &shader.id, WorkloadClass::Graphics)
+            .unwrap();
+
+        let mut stream = runtime
+            .create_command_stream(&device.id, WorkloadClass::Graphics)
+            .unwrap();
+        stream.push(GraphicsOp::BindPipeline(pipeline.id));
+        stream.push(GraphicsOp::Draw {
+            vertex_count: 3,
+            instance_count: 1,
+        });
+
+        assert!(runtime.submit(&queue, stream, &timeline.id, 1).is_ok());
+    }
+
+    #[test]
+    fn submit_rejects_bind_pipeline_unknown() {
+        let (mut runtime, device) = runtime_with_device();
+        let timeline = runtime.create_timeline(&device.id).unwrap();
+        let queue = device.queue(WorkloadClass::Graphics).unwrap();
+
+        let mut stream = runtime
+            .create_command_stream(&device.id, WorkloadClass::Graphics)
+            .unwrap();
+        stream.push(GraphicsOp::BindPipeline(ObjectId::new()));
+
+        let result = runtime.submit(&queue, stream, &timeline.id, 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn submit_rejects_bind_resource_unknown() {
+        let (mut runtime, device) = runtime_with_device();
+        let timeline = runtime.create_timeline(&device.id).unwrap();
+        let queue = device.queue(WorkloadClass::Graphics).unwrap();
+
+        let mut stream = runtime
+            .create_command_stream(&device.id, WorkloadClass::Graphics)
+            .unwrap();
+        stream.push(GraphicsOp::BindResource {
+            binding: 0,
+            resource: ObjectId::new(),
+        });
+
+        let result = runtime.submit(&queue, stream, &timeline.id, 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn submit_rejects_copy_with_unknown_resource() {
+        let (mut runtime, device) = runtime_with_device();
+        let timeline = runtime.create_timeline(&device.id).unwrap();
+        let queue = device.queue(WorkloadClass::Transfer).unwrap();
+
+        let mut stream = runtime
+            .create_command_stream(&device.id, WorkloadClass::Transfer)
+            .unwrap();
+        stream.push(GraphicsOp::Copy {
+            src: ObjectId::new(),
+            dst: ObjectId::new(),
+        });
+
+        let result = runtime.submit(&queue, stream, &timeline.id, 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn device_fault_reports_none_when_healthy() {
+        let (runtime, device) = runtime_with_device();
+        assert!(runtime.device_fault(&device.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn faulted_device_rejects_submit_until_recovered() {
+        let (mut runtime, device) = runtime_with_device();
+        let timeline = runtime.create_timeline(&device.id).unwrap();
+        let queue = device.queue(WorkloadClass::Transfer).unwrap();
+
+        runtime.driver_mut().inject_fault(0xdead, "simulated hang");
+        assert!(runtime.device_fault(&device.id).unwrap().is_some());
+
+        let stream = runtime
+            .create_command_stream(&device.id, WorkloadClass::Transfer)
+            .unwrap();
+        let result = runtime.submit(&queue, stream, &timeline.id, 1);
+        assert!(result.is_err());
+
+        runtime.recover_device(&device.id).unwrap();
+
+        // The faulting context was torn down, not resumed: the old device
+        // id is no longer valid, matching ARCHITECTURE.md section 18.
+        let stream = runtime.create_command_stream(&device.id, WorkloadClass::Transfer);
+        assert!(stream.is_err());
+    }
+
+    #[test]
+    fn recover_device_drops_its_resources_and_pipelines() {
+        let (mut runtime, device) = runtime_with_device();
+        let shader = runtime
+            .create_shader_module(&device.id, ShaderStage::Vertex, vec![0u8; 4])
+            .unwrap();
+        let pipeline = runtime
+            .create_pipeline(&device.id, &shader.id, WorkloadClass::Graphics)
+            .unwrap();
+        let resource = runtime
+            .create_resource(
+                &device.id,
+                ResourceKind::Buffer {
+                    size: 256,
+                    usage: BufferUsage::default(),
+                },
+                MemoryClass::HostVisible,
+            )
+            .unwrap();
+
+        runtime.driver_mut().inject_fault(0x1, "fault");
+        runtime.recover_device(&device.id).unwrap();
+
+        assert!(!runtime.pipelines.contains_key(&pipeline.id));
+        assert!(!runtime.shaders.contains_key(&shader.id));
+        assert!(!runtime.resources.contains_key(&resource.id));
+    }
+
+    #[test]
+    fn recovering_unknown_device_fails() {
+        let (mut runtime, _device) = runtime_with_device();
+        assert!(runtime.recover_device(&ObjectId::new()).is_err());
+    }
+
+    #[test]
     fn free_resource_returns_vram() {
         let (mut runtime, device) = runtime_with_device();
         let resource = runtime
             .create_resource(
                 &device.id,
-                ResourceKind::Buffer { size: 4096, usage: BufferUsage::default() },
+                ResourceKind::Buffer {
+                    size: 4096,
+                    usage: BufferUsage::default(),
+                },
                 MemoryClass::HostVisible,
             )
             .unwrap();

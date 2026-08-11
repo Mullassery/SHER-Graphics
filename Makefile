@@ -31,11 +31,14 @@ test:
 check:
 	cargo check --workspace
 
+# Deliberately not `--all`: rustfmt's --all also formats path dependencies,
+# and SHER-Kernel is one (../SHER-Kernel via relative path). Plain `cargo
+# fmt` stays scoped to this workspace's own members.
 fmt:
-	cargo fmt --all
+	cargo fmt
 
 fmt-check:
-	cargo fmt --all -- --check
+	cargo fmt -- --check
 
 clippy:
 	cargo clippy --workspace --all-targets -- -D warnings

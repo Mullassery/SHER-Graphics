@@ -40,9 +40,19 @@ pub struct GpuFault {
 /// binding, resource handles, etc. — only what to execute.
 #[derive(Debug, Clone)]
 pub enum DriverOp {
-    Draw { vertex_count: u32, instance_count: u32 },
-    Dispatch { x: u32, y: u32, z: u32 },
-    Copy { src: ObjectId, dst: ObjectId },
+    Draw {
+        vertex_count: u32,
+        instance_count: u32,
+    },
+    Dispatch {
+        x: u32,
+        y: u32,
+        z: u32,
+    },
+    Copy {
+        src: ObjectId,
+        dst: ObjectId,
+    },
     Barrier,
 }
 
@@ -58,6 +68,12 @@ pub trait GpuDriver: HardwareDriver {
     fn submit(&mut self, device: &ObjectId, class: WorkloadClass, ops: &[DriverOp]) -> Result<()>;
     fn fault_status(&self, device: &ObjectId) -> Result<Option<GpuFault>>;
     fn vram_available(&self, device: &ObjectId) -> Result<usize>;
+    /// Clears fault state and makes the device submittable again. Per
+    /// ARCHITECTURE.md section 18, recovery isolates and restarts the
+    /// faulting context rather than resetting the whole GPU where avoidable
+    /// — this method is the driver-level half of that; `graphics_runtime`
+    /// pairs it with tearing down the runtime-level `GraphicsDevice`.
+    fn reset_device(&mut self, device: &ObjectId) -> Result<()>;
 }
 
 /// Reference, hardware-independent implementation. Plays the same role for
@@ -84,7 +100,11 @@ impl SoftwareGpuDriver {
             name: "SHER Software GPU".to_string(),
             vendor_id: 0x0000,
             device_id: 0x0000,
-            capabilities: vec!["graphics".to_string(), "compute".to_string(), "transfer".to_string()],
+            capabilities: vec![
+                "graphics".to_string(),
+                "compute".to_string(),
+                "transfer".to_string(),
+            ],
             mmio_base: None,
             mmio_size: None,
             irq: None,
@@ -228,6 +248,12 @@ impl GpuDriver for SoftwareGpuDriver {
         self.require_device(device)?;
         Ok(self.vram_available)
     }
+
+    fn reset_device(&mut self, device: &ObjectId) -> Result<()> {
+        self.require_device(device)?;
+        self.clear_fault();
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -287,8 +313,13 @@ mod tests {
     fn submit_succeeds_without_fault() {
         let mut driver = SoftwareGpuDriver::new(4096);
         let device_id = driver.device_id();
-        let ops = vec![DriverOp::Draw { vertex_count: 3, instance_count: 1 }];
-        assert!(driver.submit(&device_id, WorkloadClass::Graphics, &ops).is_ok());
+        let ops = vec![DriverOp::Draw {
+            vertex_count: 3,
+            instance_count: 1,
+        }];
+        assert!(driver
+            .submit(&device_id, WorkloadClass::Graphics, &ops)
+            .is_ok());
     }
 
     #[test]
@@ -297,10 +328,14 @@ mod tests {
         let device_id = driver.device_id();
         driver.inject_fault(0xdead_beef, "test hang");
         let ops = vec![DriverOp::Barrier];
-        assert!(driver.submit(&device_id, WorkloadClass::Compute, &ops).is_err());
+        assert!(driver
+            .submit(&device_id, WorkloadClass::Compute, &ops)
+            .is_err());
 
         driver.clear_fault();
-        assert!(driver.submit(&device_id, WorkloadClass::Compute, &ops).is_ok());
+        assert!(driver
+            .submit(&device_id, WorkloadClass::Compute, &ops)
+            .is_ok());
     }
 
     #[test]
@@ -312,6 +347,28 @@ mod tests {
         driver.inject_fault(0x1000, "page fault");
         let fault = driver.fault_status(&device_id).unwrap().unwrap();
         assert_eq!(fault.address, 0x1000);
+    }
+
+    #[test]
+    fn reset_device_clears_fault_and_allows_submit() {
+        let mut driver = SoftwareGpuDriver::new(4096);
+        let device_id = driver.device_id();
+        driver.inject_fault(0xbad, "hang");
+        assert!(driver
+            .submit(&device_id, WorkloadClass::Graphics, &[])
+            .is_err());
+
+        driver.reset_device(&device_id).unwrap();
+        assert!(driver.fault_status(&device_id).unwrap().is_none());
+        assert!(driver
+            .submit(&device_id, WorkloadClass::Graphics, &[])
+            .is_ok());
+    }
+
+    #[test]
+    fn reset_device_rejects_unknown_device() {
+        let mut driver = SoftwareGpuDriver::new(4096);
+        assert!(driver.reset_device(&ObjectId::new()).is_err());
     }
 
     #[test]

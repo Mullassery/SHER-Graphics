@@ -64,7 +64,10 @@ impl<'a, D: GpuDriver> DrmCompatShim<'a, D> {
             DrmRequest::GemCreate { device, size } => {
                 let resource = self.runtime.create_resource(
                     &device,
-                    ResourceKind::Buffer { size, usage: BufferUsage::default() },
+                    ResourceKind::Buffer {
+                        size,
+                        usage: BufferUsage::default(),
+                    },
                     MemoryClass::DeviceLocal,
                 )?;
                 Ok(DrmResponse::GemHandle(resource.id))
@@ -83,8 +86,8 @@ impl<'a, D: GpuDriver> DrmCompatShim<'a, D> {
 mod tests {
     use super::*;
     use gpu_abstraction::SoftwareGpuDriver;
-    use sher_objectmodel::CapabilitySet;
     use sher_common::{Capability, PermissionTier};
+    use sher_objectmodel::CapabilitySet;
 
     fn shim_ready() -> (GraphicsRuntime<SoftwareGpuDriver>, ObjectId) {
         let driver = SoftwareGpuDriver::new(16 * 1024 * 1024);
@@ -101,7 +104,10 @@ mod tests {
         let (mut runtime, device) = shim_ready();
         let mut shim = DrmCompatShim::new(&mut runtime);
 
-        let handle = match shim.handle(DrmRequest::GemCreate { device, size: 4096 }).unwrap() {
+        let handle = match shim
+            .handle(DrmRequest::GemCreate { device, size: 4096 })
+            .unwrap()
+        {
             DrmResponse::GemHandle(id) => id,
             other => panic!("unexpected response: {other:?}"),
         };
@@ -115,7 +121,10 @@ mod tests {
         let (mut runtime, device) = shim_ready();
         let mut shim = DrmCompatShim::new(&mut runtime);
 
-        let handle = match shim.handle(DrmRequest::GemCreate { device, size: 1024 }).unwrap() {
+        let handle = match shim
+            .handle(DrmRequest::GemCreate { device, size: 1024 })
+            .unwrap()
+        {
             DrmResponse::GemHandle(id) => id,
             other => panic!("unexpected response: {other:?}"),
         };
@@ -138,7 +147,10 @@ mod tests {
         let (mut runtime, _device) = shim_ready();
         let mut shim = DrmCompatShim::new(&mut runtime);
 
-        let result = shim.handle(DrmRequest::GemCreate { device: ObjectId::new(), size: 4096 });
+        let result = shim.handle(DrmRequest::GemCreate {
+            device: ObjectId::new(),
+            size: 4096,
+        });
         assert!(result.is_err());
     }
 }

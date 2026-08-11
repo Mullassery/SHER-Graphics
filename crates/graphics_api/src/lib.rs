@@ -130,10 +130,23 @@ pub struct Pipeline {
 #[derive(Debug, Clone)]
 pub enum GraphicsOp {
     BindPipeline(ObjectId),
-    BindResource { binding: u32, resource: ObjectId },
-    Draw { vertex_count: u32, instance_count: u32 },
-    Dispatch { x: u32, y: u32, z: u32 },
-    Copy { src: ObjectId, dst: ObjectId },
+    BindResource {
+        binding: u32,
+        resource: ObjectId,
+    },
+    Draw {
+        vertex_count: u32,
+        instance_count: u32,
+    },
+    Dispatch {
+        x: u32,
+        y: u32,
+        z: u32,
+    },
+    Copy {
+        src: ObjectId,
+        dst: ObjectId,
+    },
     Barrier,
 }
 
@@ -260,7 +273,10 @@ mod tests {
         };
         let pipeline = ObjectId::new();
         stream.push(GraphicsOp::BindPipeline(pipeline));
-        stream.push(GraphicsOp::Draw { vertex_count: 3, instance_count: 1 });
+        stream.push(GraphicsOp::Draw {
+            vertex_count: 3,
+            instance_count: 1,
+        });
         assert_eq!(stream.ops.len(), 2);
     }
 
@@ -270,8 +286,14 @@ mod tests {
             id: ObjectId::new(),
             gpu: ObjectId::new(),
             queues: vec![
-                QueueHandle { id: ObjectId::new(), class: WorkloadClass::Graphics },
-                QueueHandle { id: ObjectId::new(), class: WorkloadClass::Compute },
+                QueueHandle {
+                    id: ObjectId::new(),
+                    class: WorkloadClass::Graphics,
+                },
+                QueueHandle {
+                    id: ObjectId::new(),
+                    class: WorkloadClass::Compute,
+                },
             ],
         };
         assert!(device.queue(WorkloadClass::Graphics).is_some());
@@ -296,8 +318,14 @@ mod tests {
     #[test]
     fn default_tiers_match_capability_sensitivity() {
         assert_eq!(default_tier(Capability::GpuAdmin), PermissionTier::Critical);
-        assert_eq!(default_tier(Capability::GpuCommandSubmit), PermissionTier::High);
-        assert_eq!(default_tier(Capability::GpuMemoryAlloc), PermissionTier::Medium);
+        assert_eq!(
+            default_tier(Capability::GpuCommandSubmit),
+            PermissionTier::High
+        );
+        assert_eq!(
+            default_tier(Capability::GpuMemoryAlloc),
+            PermissionTier::Medium
+        );
     }
 
     #[test]
@@ -307,7 +335,10 @@ mod tests {
             device: ObjectId::new(),
             kind: ResourceKind::Buffer {
                 size: 4096,
-                usage: BufferUsage { uniform: true, ..Default::default() },
+                usage: BufferUsage {
+                    uniform: true,
+                    ..Default::default()
+                },
             },
             memory_class: MemoryClass::HostVisible,
         };

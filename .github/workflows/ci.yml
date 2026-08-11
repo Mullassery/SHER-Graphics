@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # SHER-Kernel is consumed via relative path dependencies
+      # (../SHER-Kernel/crates/...), so it must be checked out as a sibling
+      # directory under the same workspace root as SHER-Graphics.
+      - name: Checkout SHER-Graphics
+        uses: actions/checkout@v4
+        with:
+          path: SHER-Graphics
+
+      - name: Checkout SHER-Kernel
+        uses: actions/checkout@v4
+        with:
+          repository: Mullassery/SHER-KERNEL
+          path: SHER-Kernel
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            SHER-Graphics/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('SHER-Graphics/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # Deliberately not `cargo fmt --all`: rustfmt's --all also formats
+      # path dependencies, which would reach into SHER-Kernel.
+      - name: cargo fmt --check
+        working-directory: SHER-Graphics
+        run: cargo fmt -- --check
+
+      - name: cargo build (all targets, including examples)
+        working-directory: SHER-Graphics
+        run: cargo build --workspace --all-targets
+
+      - name: cargo test
+        working-directory: SHER-Graphics
+        run: cargo test --workspace
+
+      - name: cargo clippy
+        working-directory: SHER-Graphics
+        run: cargo clippy --workspace --all-targets -- -D warnings

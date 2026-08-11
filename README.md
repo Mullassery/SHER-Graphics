@@ -1,5 +1,7 @@
 # SHER Graphics
 
+[![CI](https://github.com/Mullassery/SHER-Graphics/actions/workflows/ci.yml/badge.svg)](https://github.com/Mullassery/SHER-Graphics/actions/workflows/ci.yml)
+
 Native graphics architecture for [SHER Kernel](https://github.com/Mullassery/SHER-KERNEL), built on the same philosophy [Aurora](https://github.com/Mullassery/aurora) applies to the desktop layer:
 
 > Compatibility at the boundary, freedom underneath.
@@ -10,7 +12,7 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full design: philosophy, why 
 
 ## Status
 
-Design phase. Crate skeletons exist, compile, and pass 31 tests; no hardware backend yet. `gpu_abstraction::SoftwareGpuDriver` is a hardware-independent reference driver — the whole stack runs and tests without a GPU, the same role `llvmpipe`/`lavapipe` play for Mesa (see `ARCHITECTURE.md` section 21).
+Design phase. Crate skeletons exist, compile, and pass 42 tests; no hardware backend yet. `gpu_abstraction::SoftwareGpuDriver` is a hardware-independent reference driver — the whole stack runs and tests without a GPU, the same role `llvmpipe`/`lavapipe` play for Mesa (see `ARCHITECTURE.md` section 21). `cargo run -p graphics_runtime --example triangle` walks the full path end to end: device → shaders → pipeline → resource → validated command stream → submit → wait → present.
 
 ## Workspace
 

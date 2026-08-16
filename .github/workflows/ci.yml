@@ -29,6 +29,21 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # `crates/vulkan_backend` talks to a real Vulkan loader/ICD via
+      # `ash`. It never fails the build without one (see that crate's
+      # module docs: `ash`'s `loaded` feature dlopen()s the loader at
+      # runtime, not link time), but installing Mesa's lavapipe here means
+      # its tests exercise a real, if CPU-rendered, Vulkan device on CI
+      # instead of hitting their "no loader available" skip path — the
+      # same honesty bar as the rest of this pass: don't just claim real
+      # Vulkan works, prove it runs somewhere that isn't the maintainer's
+      # own machine.
+      - name: Install a software Vulkan ICD (Mesa lavapipe)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools libvulkan1
+          vulkaninfo --summary || true
+
       - name: Cache cargo registry and build artifacts
         uses: actions/cache@v4
         with:

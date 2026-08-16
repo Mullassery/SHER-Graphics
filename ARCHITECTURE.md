@@ -1,6 +1,6 @@
 # SHER Graphics Architecture
 
-**Status**: Design — precedes implementation
+**Status**: Design for the native runtime/abstraction/Mesa-compatibility layers described below — precedes implementation there. Not true project-wide: see §23 for a real, working Vulkan (`ash`) backend (device enumeration + offscreen render, verified against MoltenVK) that exists today, standalone from the software simulation the rest of this document covers.
 **Scope**: Native graphics subsystem for SHER Kernel, with OpenGL and Vulkan as compatibility-facing interfaces
 **Relationship to existing work**: Extends Phase 11 (`hal`, `gpu_driver`, `wayland_server`) and the LKI compatibility model (`lki`, `driver_runtime`, `compatibility`)
 **Precedent**: Applies the same philosophy already proven by Aurora at the desktop layer — see `CLAUDE.md` principle 2, *"Compatibility Without Dependency"*, and `INTEGRATION_ANALYSIS.md` / `COMPLETE_ECOSYSTEM_ANALYSIS.md`, which already document Aurora's rendering path running on this same GPU stack (`Aurora colors use GPU (DRM/KMS)`).
@@ -552,3 +552,46 @@ Native apps ──┘
 ```
 
 OpenGL and Vulkan are compatibility interfaces satisfied almost entirely by reusing Mesa's existing, mature, vendor-maintained code — the same way Aurora satisfies GTK4 compatibility by reusing GTK4/libadwaita wholesale. The only SHER-specific compatibility code is the thin winsys/WSI/ioctl-shim seam. Everything below that seam — the runtime, the abstraction layer, the memory model, the synchronization primitive, the scheduling integration — is designed against SHER Kernel's actual primitives (`ObjectId`, `CapabilitySet`, `scheduler`, `ARO`), not against what Vulkan happened to need in 2016.
+
+---
+
+## 23. Addendum: a real Vulkan backend (`vulkan_backend`)
+
+Everything above this section was written, and largely still holds, as design that *precedes* implementation. One gap needed correcting: this document and this repo's public description previously described the project as "Vulkan/OpenGL via Mesa" while containing zero Vulkan/OpenGL/Mesa dependency anywhere — every crate was a pure-Rust software simulation (§21's `llvmpipe`/`lavapipe`-equivalent path), never connected to a real Vulkan loader, ICD, or GPU. That was a real gap between claim and implementation, not just an imprecise sentence, and it's fixed by this section plus `crates/vulkan_backend`.
+
+### The question this section answers
+
+Section 21 lists Phase A (LKI-hosted Linux GPU drivers) as the highest-risk, highest-effort item and correctly does not recommend attempting it casually. But there's a narrower, much cheaper question Phase A doesn't ask: on a **userspace** machine — no kernel driver work, no ring-0, nothing SHER Kernel-specific required — can this project make *real* Vulkan calls at all, today? Vulkan is a userspace API reached through a loader + ICD; unlike kernel driver hosting, nothing about it requires special privilege or SHER Kernel integration to attempt.
+
+The answer, verified rather than assumed: **yes.**
+
+### What was actually done
+
+On a macOS development machine with no Vulkan/MoltenVK preinstalled (`vulkaninfo`: not found; no MoltenVK libs present):
+
+```bash
+brew install molten-vk vulkan-loader vulkan-tools vulkan-headers
+export VK_ICD_FILENAMES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json
+export DYLD_LIBRARY_PATH=/opt/homebrew/lib:$DYLD_LIBRARY_PATH
+vulkaninfo --summary
+```
+
+This produced a real device listing — `Apple M5`, `driverID = DRIVER_ID_MOLTENVK`, `deviceType = INTEGRATED_GPU`, `apiVersion = 1.4.357` — proving a genuine Vulkan-to-Metal translation path is viable on this machine with no GPU passthrough, no VM, and no custom driver work: MoltenVK is exactly the "Vulkan-to-Metal translation layer" this kind of investigation is supposed to check for, and it works.
+
+`crates/vulkan_backend` was then built as a real FFI binding using [`ash`](https://docs.rs/ash) (the standard idiomatic Rust Vulkan binding, matching this document's stated preference elsewhere for reusing mature, vendor-maintained code rather than hand-rolling FFI). It implements, and tests against the real MoltenVK ICD above, verify:
+
+1. **Real device enumeration** — `vkEnumeratePhysicalDevices` + `vkGetPhysicalDeviceProperties`, returning the ICD's actual reported name/vendor/device-type/driver-version data.
+2. **A real offscreen clear-color render** — a real device-local `VkImage`, a real recorded-and-submitted command buffer (`vkCmdClearColorImage` → `vkCmdCopyImageToBuffer` with correct layout-transition barriers between them), a real fence wait, and a readback from a real host-visible `VkDeviceMemory` mapping. The crate's test asserts the read-back bytes equal the requested clear color (±2 for UNORM rounding) — meaning the test fails if the GPU/ICD didn't actually do the work, not merely if a Vulkan call returned an error code.
+
+### What was deliberately *not* done, and why
+
+`vulkan_backend` does not implement `gpu_abstraction::GpuDriver` or plug into `graphics_runtime::GraphicsRuntime`. That integration is real, separate design work this pass didn't try to rush:
+
+- `GpuDriver::submit` and the rest of the trait are shaped around `SoftwareGpuDriver`'s synchronous, always-deterministic semantics (§21's reference-driver role). A real Vulkan device is asynchronous, can report `VK_ERROR_DEVICE_LOST`, and has real memory-type/heap constraints a bump allocator (`SoftwareGpuDriver::allocate_vram`'s current approach) doesn't model.
+- `gpu_abstraction::GpuFault`/`reset_device` assume software-driver-shaped fault injection (§18); mapping that onto real device-lost recovery, real fence-based timeline semantics (§11's `Timeline`, currently satisfied synchronously per `graphics_runtime`'s `wait`), and real memory-type-aware allocation is enough independent work to deserve its own pass rather than being bolted on as a side effect of proving Vulkan calls work at all.
+
+So today there are honestly two, separate things in this workspace, not one hybrid: the software simulation (§21, all of `graphics_api`/`gpu_abstraction`/`graphics_runtime`/`graphics_compat`) that the rest of this document describes, and `vulkan_backend`, a standalone, real, independently-verified Vulkan binding. Wiring the second into the first is the natural next roadmap item once the real device's error/async semantics have been thought through as carefully as §16–18 thought through the software driver's.
+
+### Why this doesn't change §20's Phase A risk assessment
+
+MoltenVK/real-Vulkan-in-userspace and "Phase A: LKI-hosted Linux GPU kernel drivers" are different problems at different layers. Proving userspace Vulkan calls reach a real GPU says nothing about the difficulty of hosting `amdgpu`/`i915` kernel driver code inside SHER Kernel's LKI sandbox — that risk assessment in §20–21 is unchanged. What this section changes is narrower and more honest: the project no longer claims a Mesa/Vulkan/OpenGL dependency it doesn't have, and it now also doesn't claim to have *no* real Vulkan integration when a genuine, verified one — narrower in scope than full driver hosting, but real — exists in `vulkan_backend`.

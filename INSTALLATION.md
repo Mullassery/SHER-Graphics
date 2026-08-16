@@ -1,10 +1,15 @@
 # SHER Graphics - Installation & Development Setup
 
-**Status**: Design phase — crate skeletons compile and pass tests; no hardware
-backend yet. This guide covers setting up the workspace for development,
-not deploying a running graphics stack (there isn't one to deploy yet — see
-[`ARCHITECTURE.md`](./ARCHITECTURE.md) section 21 for what's implementable
-first).
+**Status**: Design phase for the native runtime (`graphics_api`/`gpu_abstraction`/
+`graphics_runtime`/`graphics_compat`) — those crate skeletons compile and
+pass tests against a software reference driver, no real GPU driver wired in
+yet. Separately, `vulkan_backend` is a real, working Vulkan (`ash`) binding
+against an actual loader/ICD (device enumeration + an offscreen
+clear-color render) — see `README.md` and that crate's module docs for
+exactly what's real there. This guide covers setting up the workspace for
+development, not deploying a running graphics stack (there isn't one to
+deploy yet — see [`ARCHITECTURE.md`](./ARCHITECTURE.md) section 21 for
+what's implementable first).
 
 ---
 
@@ -65,10 +70,16 @@ cargo build
 cargo test
 ```
 
-All four crates (`graphics_api`, `gpu_abstraction`, `graphics_runtime`,
+Four of the five crates (`graphics_api`, `gpu_abstraction`, `graphics_runtime`,
 `graphics_compat`) run entirely in software — `gpu_abstraction::SoftwareGpuDriver`
 is a hardware-independent reference driver, so no GPU or root access is
 required to build or test.
+
+The fifth, `vulkan_backend`, is a real Vulkan (`ash`) binding, but only
+`dlopen()`s the actual Vulkan loader at **runtime**, not build/link time —
+see "Optional: real Vulkan" below — so `cargo build`/`cargo test` also
+succeed with no Vulkan installed at all; its GPU-dependent tests report
+"skipping: no Vulkan loader/ICD available" and pass rather than fail.
 
 ### Or, automated
 
@@ -90,6 +101,7 @@ cargo test -p graphics_api
 cargo test -p gpu_abstraction
 cargo test -p graphics_runtime
 cargo test -p graphics_compat
+cargo test -p vulkan_backend
 
 # With output
 cargo test -- --nocapture
@@ -98,9 +110,43 @@ cargo test -- --nocapture
 cargo doc --open
 ```
 
-Expected: 31 tests passing, zero warnings from this workspace's own crates
+Expected: 61 tests passing, zero warnings from this workspace's own crates
 (pre-existing warnings from `sher_objectmodel` in SHER-Kernel are unrelated
-and safe to ignore).
+and safe to ignore). If no Vulkan loader is installed, `vulkan_backend`'s
+GPU-dependent tests still count as passing — they detect that up front and
+skip, per its module docs.
+
+---
+
+## Optional: real Vulkan (for `vulkan_backend`)
+
+Not required to build or pass tests — `vulkan_backend`'s tests skip
+gracefully without a Vulkan loader/ICD present (see above). Installing one
+lets those tests exercise a real device instead:
+
+**macOS** (verified against an Apple M5 via MoltenVK during this repo's own
+Vulkan-integration pass):
+
+```bash
+brew install molten-vk vulkan-loader vulkan-tools vulkan-headers
+export VK_ICD_FILENAMES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json
+export DYLD_LIBRARY_PATH=/opt/homebrew/lib:$DYLD_LIBRARY_PATH
+vulkaninfo --summary   # confirm a real device is listed
+cargo test -p vulkan_backend -- --nocapture
+```
+
+Homebrew's `/opt/homebrew/lib` isn't on macOS's default `dyld` search path,
+so both environment variables above are required every session (or export
+them from your shell profile) — without them the loader simply won't be
+found and `vulkan_backend`'s tests will (correctly) skip rather than fail.
+
+**Linux**: `mesa-vulkan-drivers` (lavapipe, a real CPU-rendered Vulkan ICD)
+from your distro's package manager — this is what this repo's CI installs:
+
+```bash
+sudo apt-get install -y mesa-vulkan-drivers vulkan-tools libvulkan1
+cargo test -p vulkan_backend -- --nocapture
+```
 
 ---
 

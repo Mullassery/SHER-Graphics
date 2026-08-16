@@ -4,6 +4,7 @@ members = [
     "crates/gpu_abstraction",
     "crates/graphics_runtime",
     "crates/graphics_compat",
+    "crates/vulkan_backend",
 ]
 resolver = "2"
 

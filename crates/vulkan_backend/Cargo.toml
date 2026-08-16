@@ -1,0 +1,17 @@
+[package]
+name = "vulkan_backend"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Real Vulkan (ash) backend: physical-device enumeration and an offscreen clear-color render against an actual Vulkan ICD (e.g. MoltenVK). Alongside, not a replacement for, gpu_abstraction::SoftwareGpuDriver — see crate-level docs for exactly what's real."
+
+[dependencies]
+# `loaded` (the default) dlopen()s the Vulkan loader at runtime via
+# `libloading` rather than link-time linking against libvulkan — so
+# `cargo build`/`cargo check` succeed on machines with no Vulkan loader
+# installed at all (e.g. CI). Only code paths that actually call
+# `Entry::load()` need the loader present, and this crate's public API
+# surfaces that as a `Result`/`Option` instead of panicking.
+ash = { version = "0.38", default-features = false, features = ["loaded", "std", "debug"] }

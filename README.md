@@ -18,7 +18,7 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full design: philosophy, why 
 
 Two things, honestly labeled, alongside each other:
 
-**A pure-Rust, zero-`unsafe`, zero-FFI software GPU simulation** — the bulk of this workspace. It plays the same role `llvmpipe`/`lavapipe` play for Mesa: a hardware-independent correctness baseline the rest of the stack is built and tested against. 61 tests pass with no GPU hardware, no Vulkan, and no Mesa dependency in the loop.
+**A pure-Rust, zero-`unsafe`, zero-FFI software GPU simulation** — the bulk of this workspace. It plays the same role `llvmpipe`/`lavapipe` play for Mesa: a hardware-independent correctness baseline the rest of the stack is built and tested against. 57 tests pass with no GPU hardware, no Vulkan, and no Mesa dependency in the loop (`cargo test --workspace --exclude vulkan_backend`).
 
 - Native graphics API: device, resource, pipeline, command-stream, and timeline object model (`graphics_api`)
 - GPU abstraction layer with multi-GPU support and an in-process software reference driver (`gpu_abstraction`)
@@ -84,6 +84,22 @@ cargo test
 ```
 
 See the [`Makefile`](./Makefile) (`make help`) for the rest of the dev workflow: `fmt`, `clippy`, `doc`, `clean`.
+
+## Known Issues
+
+- `vulkan_backend` is real but standalone: it is not yet wired into
+  `gpu_abstraction::GpuDriver`/`graphics_runtime::GraphicsRuntime`, so
+  nothing in the runtime/API layers currently routes through it. Bridging
+  its asynchronous, device-lost-capable semantics into the software
+  driver's synchronous trait shape is tracked as follow-up work, not done.
+- `graphics_compat` (the Mesa winsys/WSI compatibility seam) models the
+  planned Phase A seam but is not backed by a real Mesa build yet.
+- This workspace depends on `SHER-Kernel` via relative path (`../SHER-Kernel`),
+  not a published crate, so it cannot be built or published standalone —
+  no crates.io registry drift check applies to a systems component with no
+  independent publish target.
+- No open GitHub issues and no `TODO`/`FIXME` markers in `crates/` as of
+  this pass.
 
 ## Contributing
 

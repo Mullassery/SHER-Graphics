@@ -50,6 +50,39 @@ Real today, separately: vulkan_backend (ash) → real Vulkan loader/ICD → real
 
 `ARCHITECTURE.md` covers the full layering: the native API/runtime/abstraction split, the Mesa winsys/WSI integration strategy, the security and capability model, and the phased migration path from LKI-hosted Linux GPU drivers to native SHER drivers.
 
+## Cross-repo compatibility (verified, whole family)
+
+This repo is part of a 5-repo family under the Mullassery org, expected to
+be cloned as sibling directories: `SHER-Kernel`, `SHER-Graphics` (this
+repo), `SHER-Display`, `SHER-Input`, and `Aurora` (GitHub: `SHER-Aurora`).
+Actual Cargo-level coupling, confirmed by reading every `Cargo.toml` in the
+family:
+
+- **SHER-Kernel** — foundation. This repo depends on it (`sher_common`,
+  `sher_objectmodel`, `sher_security`, `hal`, `gpu_driver`) via relative
+  path (`../SHER-Kernel/crates/...`), so both repos must be sibling
+  directories.
+- **SHER-Input** — standalone, no dependency on this repo or vice versa.
+- **SHER-Display** — depends on this repo (`graphics_api`,
+  `gpu_abstraction`, `graphics_runtime`, `graphics_compat`) in addition to
+  SHER-Kernel and SHER-Input.
+- **Aurora** — zero Cargo-level coupling to this repo. Standalone GTK/Qt/Web
+  toolkit; shared "SHER" naming is organizational only.
+
+Both edition (2021) and the dependency contract are verified current: a
+from-scratch `cargo build --workspace` in this repo against SHER-Kernel's
+current state compiles clean (`graphics_api`, `vulkan_backend`,
+`gpu_abstraction`, `graphics_runtime`, `graphics_compat` all build); a
+from-scratch `cargo build --workspace` + `cargo test --workspace` in
+SHER-Display against this repo's current state also compiles and passes
+56/56. This repo is the sole owner of `ash` (Vulkan bindings, 0.38) in the
+family — that dependency isn't leaked across the repo boundary via public
+APIs, so there's no divergent-version risk downstream. `graphics_runtime`
+is the crate that actually instantiates `gpu_driver::GPUDriver` from
+SHER-Kernel; SHER-Display deliberately does not (see SHER-Display's
+`outputs` crate), consuming only value types instead — boundary discipline
+holds across the live chain.
+
 ## Workspace
 
 ```

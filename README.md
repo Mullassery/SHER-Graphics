@@ -133,6 +133,15 @@ See the [`Makefile`](./Makefile) (`make help`) for the rest of the dev workflow:
   independent publish target.
 - No open GitHub issues and no `TODO`/`FIXME` markers in `crates/` as of
   this pass.
+- No driver crash-containment or hot-restart (external critique, verified real
+  gap): what exists today is a capability/permission ACL (`sher_common::Capability`)
+  and an in-process, in-memory `DeviceState.fault` field for *modeled hardware*
+  faults (`inject_fault`/`fault_status`) — not a process boundary. There's no
+  `catch_unwind`, no subprocess/WASM/eBPF isolation anywhere in the workspace, so
+  a real panic in driver code would unwind straight through the caller. The actual
+  sandbox mechanism (`driver_runtime`'s `DriverContainer`/`SyscallPolicy`) lives in
+  SHER-Kernel and is explicitly "Phase A — ship first," not yet built — this repo
+  only runs the in-process software reference driver today.
 
 ## Contributing
 

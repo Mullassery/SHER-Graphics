@@ -1,87 +1,22 @@
-SHER Graphics License
+Proprietary License — Free to use with explicit attribution
 
-Copyright (c) 2026 Georgi Mammen Mullassery
+Copyright © 2026 Georgi Mammen Mullassery
 
-INTELLECTUAL PROPERTY AND USAGE TERMS
+Permission is granted to any person obtaining a copy of this software to use,
+copy, modify, and distribute this software and its documentation, provided that:
 
-SHER Graphics is the native graphics architecture for SHER Kernel
-(https://github.com/Mullassery/SHER-KERNEL), applying the same compatibility
-philosophy proven by Aurora (https://github.com/Mullassery/aurora) at the
-desktop layer to the graphics subsystem: OpenGL and Vulkan applications run
-through Mesa unmodified, while SHER Graphics is free to define its own
-native runtime, GPU abstraction, and synchronization model underneath.
+1. The above copyright notice and this permission notice appear in all copies
+   or substantial portions of the software.
 
-PERMITTED USE
+2. Explicit attribution to the original author (Georgi Mammen Mullassery) is
+   provided in any project documentation and significant code comments where
+   this software is used.
 
-This software is made available for use, study, and modification under the
-following terms:
+3. The software is provided "AS IS" without warranty of any kind, express or
+   implied, including but not limited to the warranties of merchantability,
+   fitness for a particular purpose, or non-infringement.
 
-1. Free to use with explicit attribution to Georgi Mammen Mullassery and the
-   SHER Graphics project
-2. Permission granted to use, copy, modify, and distribute subject to these
-   conditions:
-   - Clear and visible attribution to the original work is required in all
-     copies or substantial portions of the software
-   - Any derivative works or projects must clearly acknowledge SHER Graphics
-     as the foundational work
-   - The license text must accompany all distributions
+4. In no event shall the author be liable for any claim, damages, or other
+   liability arising from the use of this software.
 
-RESTRICTIONS
-
-You may not:
-- Remove or obscure copyright notices or attribution
-- Claim original authorship of the SHER Graphics architecture without
-  proper attribution
-- Use this software in a way that removes or diminishes credit to the
-  original author
-- Sublicense this work without maintaining the original attribution
-  requirements
-
-DERIVATIVE WORKS
-
-If you create derivative works, modifications, or projects based on SHER
-Graphics:
-- You must include prominent notice of modifications made
-- You must maintain attribution to Georgi Mammen Mullassery and the SHER
-  Graphics project
-- The source repository link (https://github.com/Mullassery/SHER-Graphics)
-  must be referenced
-- Your derivative work must be clearly identified as such
-
-ACADEMIC AND RESEARCH USE
-
-Academic institutions and researchers are encouraged to use, study, and
-build upon this work with the requirement of proper citation and
-attribution in publications.
-
-COMMERCIAL USE
-
-Commercial use is permitted provided:
-- Proper attribution to the original work is maintained in documentation
-  and source code
-- The source repository is referenced in any commercial product
-  documentation
-- Users of commercial products derived from this work are informed of the
-  original source
-
-LIABILITY
-
-THIS SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
-ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-ATTRIBUTION REQUIREMENT
-
-All uses must include the following attribution:
-
-"This project is based on SHER Graphics by Georgi Mammen Mullassery
-(https://github.com/Mullassery/SHER-Graphics)"
-
-For more information, contact: mullassery@gmail.com
-
----
-
-SHER Graphics: Compatibility at the boundary, freedom underneath.
+For more information, visit: https://github.com/Mullassery

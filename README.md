@@ -18,11 +18,12 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full design: philosophy, why 
 
 Two things, honestly labeled, alongside each other:
 
-**A pure-Rust, zero-`unsafe`, zero-FFI software GPU simulation** — the bulk of this workspace. It plays the same role `llvmpipe`/`lavapipe` play for Mesa: a hardware-independent correctness baseline the rest of the stack is built and tested against. 57 tests pass with no GPU hardware, no Vulkan, and no Mesa dependency in the loop (`cargo test --workspace --exclude vulkan_backend`).
+**A pure-Rust, zero-`unsafe`, zero-FFI software GPU simulation** — the bulk of this workspace. It plays the same role `llvmpipe`/`lavapipe` play for Mesa: a hardware-independent correctness baseline the rest of the stack is built and tested against. 59 tests pass with no GPU hardware, no Vulkan, and no Mesa dependency in the loop (`cargo test --workspace --exclude vulkan_backend`).
 
 - Native graphics API: device, resource, pipeline, command-stream, and timeline object model (`graphics_api`)
 - GPU abstraction layer with multi-GPU support and an in-process software reference driver (`gpu_abstraction`)
 - Command-stream validation, GPU fault detection, and isolated per-context fault recovery, so one context's failure doesn't take down others
+- Driver panic containment: `graphics_runtime::submit` catches a panic inside driver code (`catch_unwind`) instead of letting it unwind through the caller, marks the device faulted through the same `GpuFault` channel a hardware fault uses, and the existing `recover_device` path hot-restarts it — a fresh device can be created and used again immediately, without crashing the runtime or the process
 - Every capability-gated operation (device creation, submission, admin/recovery) reuses SHER Kernel's existing capability and tier security model, not a graphics-specific one, and every grant/denial flows into an audit trail
 - Cursor rendering primitives (`set_cursor_image`, `set_cursor_position`, `show_cursor`, `hide_cursor`) that own how the cursor is drawn without touching position tracking, focus, or input, which stay in SHER-Input/SHER-Display
 - `cargo run -p graphics_runtime --example triangle` walks the entire stack end to end: device → shaders → pipeline → resource → validated command stream → submit → wait → present
@@ -133,15 +134,29 @@ See the [`Makefile`](./Makefile) (`make help`) for the rest of the dev workflow:
   independent publish target.
 - No open GitHub issues and no `TODO`/`FIXME` markers in `crates/` as of
   this pass.
-- No driver crash-containment or hot-restart (external critique, verified real
-  gap): what exists today is a capability/permission ACL (`sher_common::Capability`)
-  and an in-process, in-memory `DeviceState.fault` field for *modeled hardware*
-  faults (`inject_fault`/`fault_status`) — not a process boundary. There's no
-  `catch_unwind`, no subprocess/WASM/eBPF isolation anywhere in the workspace, so
-  a real panic in driver code would unwind straight through the caller. The actual
-  sandbox mechanism (`driver_runtime`'s `DriverContainer`/`SyscallPolicy`) lives in
-  SHER-Kernel and is explicitly "Phase A — ship first," not yet built — this repo
-  only runs the in-process software reference driver today.
+- **In-process driver panic containment — fixed; process/WASM/eBPF-level
+  sandboxing — still not built.** `GraphicsRuntime::submit` now wraps the
+  driver call in `catch_unwind` (via a new `submit_to_driver` helper); a
+  caught panic is converted into a normal `Err` and recorded through the
+  same `GpuFault` channel a hardware-reported fault already uses
+  (`GpuDriver::mark_faulted`, implemented for `SoftwareGpuDriver` by
+  reusing `inject_fault`), so `device_fault`/`recover_device` handle a
+  caught panic exactly like any other fault — no separate case for
+  callers to think about. Verified with a test driver whose `submit`
+  always panics: the panic doesn't escape `GraphicsRuntime::submit`, the
+  device is reported faulted afterward, and `recover_device` + a fresh
+  `create_device` on the same GPU works immediately after (`graphics_runtime`'s
+  `submit_catches_a_driver_panic_instead_of_crashing` and
+  `a_caught_driver_panic_marks_the_device_faulted_and_is_hot_restartable`).
+  This is still *in-process* containment, not a process boundary: there's
+  no subprocess/WASM/eBPF isolation anywhere in this workspace, and the
+  actual sandbox mechanism (`driver_runtime`'s `DriverContainer`/
+  `SyscallPolicy`) lives in SHER-Kernel and is explicitly "Phase A — ship
+  first," not yet built — this repo only runs the in-process software
+  reference driver today. What changed here is that a driver-code panic
+  no longer takes the whole process down with it; it doesn't add real
+  OS-level process isolation, which would need to be designed jointly
+  with SHER-Kernel's driver lifecycle.
 
 ## Contributing
 

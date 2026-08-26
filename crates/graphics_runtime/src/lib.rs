@@ -377,6 +377,66 @@ impl<D: GpuDriver> GraphicsRuntime<D> {
         self.pipelines.retain(|_, p| &p.device != device);
         Ok(())
     }
+
+    /// Driver crash containment (external critique, verified real gap — see
+    /// README.md's Known Issues): a real panic inside driver code used to
+    /// unwind straight through this call and into the caller, taking down
+    /// the whole process with it. `submit` is the hot, per-frame path where
+    /// a malformed command stream reaching a driver backend is most likely
+    /// to trigger one, so it's caught here via `catch_unwind` and converted
+    /// into the same `GpuFault` channel a hardware-reported fault already
+    /// uses — the device is marked faulted (via `GpuDriver::mark_faulted`)
+    /// and the caller gets a normal `Err`, not a crash. Recovering from it
+    /// is the existing `recover_device` path: this does not, on its own,
+    /// resume the faulted context, matching how a hardware fault already
+    /// behaves.
+    ///
+    /// `AssertUnwindSafe` is required because `&mut self.driver` isn't
+    /// `UnwindSafe` by default (a panic mid-mutation could leave it in an
+    /// inconsistent state) — that's precisely why the caught path doesn't
+    /// try to resume normal operation on the same device afterward, only
+    /// mark-and-report, leaving `reset_device`/`recover_device` (the
+    /// existing, already-audited recovery path) as the one way back to a
+    /// submittable device.
+    ///
+    /// Still not process/WASM/eBPF-level isolation — see README.md's Known
+    /// Issues for what that would require and why it lives in SHER-Kernel's
+    /// `driver_runtime`, not here.
+    fn submit_to_driver(
+        &mut self,
+        gpu: &ObjectId,
+        class: WorkloadClass,
+        ops: &[gpu_abstraction::DriverOp],
+    ) -> Result<()> {
+        let driver = &mut self.driver;
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            driver.submit(gpu, class, ops)
+        })) {
+            Ok(result) => result,
+            Err(panic_payload) => {
+                let description = panic_message(&*panic_payload);
+                self.driver.mark_faulted(gpu, description.clone());
+                Err(Error::Device(format!(
+                    "driver panicked during submit: {description}"
+                )))
+            }
+        }
+    }
+}
+
+/// Best-effort extraction of a human-readable message from a caught panic
+/// payload. `panic!("...")`/`.unwrap()`/`.expect("...")` all produce either
+/// `&'static str` or `String` payloads in practice; anything else (a custom
+/// `panic_any` with another type) falls back to a fixed message rather than
+/// failing to report the fault at all.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "driver panicked with a non-string payload".to_string()
+    }
 }
 
 impl<D: GpuDriver> GraphicsApi for GraphicsRuntime<D> {
@@ -528,7 +588,7 @@ impl<D: GpuDriver> GraphicsApi for GraphicsRuntime<D> {
         validate_stream(&stream, &self.pipelines, &self.resources)?;
 
         let driver_ops = translate_ops(&stream.ops);
-        self.driver.submit(&gpu, queue.class, &driver_ops)?;
+        self.submit_to_driver(&gpu, queue.class, &driver_ops)?;
 
         self.timelines.insert(*timeline, signal_value);
         Ok(())
@@ -1091,6 +1151,134 @@ mod tests {
 
         runtime.recover_device(&device.id, &admin_caps()).unwrap();
         assert!(runtime.device(&device.id).is_err());
+    }
+
+    /// Test double: identical to `SoftwareGpuDriver` for everything except
+    /// `submit`, which always panics — used to prove `GraphicsRuntime::submit`
+    /// catches a driver panic instead of letting it unwind through the
+    /// caller (the driver-crash-containment gap this pass fixes; see
+    /// README.md's Known Issues).
+    struct PanickingDriver {
+        inner: SoftwareGpuDriver,
+    }
+
+    impl PanickingDriver {
+        fn new(vram_bytes: usize) -> Self {
+            Self {
+                inner: SoftwareGpuDriver::new(vram_bytes),
+            }
+        }
+
+        fn device_id(&self) -> ObjectId {
+            self.inner.device_id()
+        }
+    }
+
+    impl hal::HardwareDriver for PanickingDriver {
+        fn probe(&self) -> Result<Vec<hal::DeviceInfo>> {
+            self.inner.probe()
+        }
+        fn initialize(&mut self, device: &hal::DeviceInfo) -> Result<()> {
+            self.inner.initialize(device)
+        }
+        fn shutdown(&mut self, device_id: &ObjectId) -> Result<()> {
+            self.inner.shutdown(device_id)
+        }
+        fn get_capabilities(&self, device_id: &ObjectId) -> Result<Vec<String>> {
+            self.inner.get_capabilities(device_id)
+        }
+        fn read_register(&self, device_id: &ObjectId, offset: usize) -> Result<u32> {
+            self.inner.read_register(device_id, offset)
+        }
+        fn write_register(&self, device_id: &ObjectId, offset: usize, value: u32) -> Result<()> {
+            self.inner.write_register(device_id, offset, value)
+        }
+    }
+
+    impl GpuDriver for PanickingDriver {
+        fn allocate_vram(
+            &mut self,
+            device: &ObjectId,
+            size: usize,
+            class: MemoryClass,
+        ) -> Result<gpu_abstraction::GpuAllocation> {
+            self.inner.allocate_vram(device, size, class)
+        }
+        fn free_vram(&mut self, allocation: &ObjectId) -> Result<()> {
+            self.inner.free_vram(allocation)
+        }
+        fn map_dma(&mut self, allocation: &ObjectId) -> Result<gpu_abstraction::DmaMapping> {
+            self.inner.map_dma(allocation)
+        }
+        fn submit(
+            &mut self,
+            _device: &ObjectId,
+            _class: WorkloadClass,
+            _ops: &[DriverOp],
+        ) -> Result<()> {
+            panic!("simulated driver panic during submit");
+        }
+        fn fault_status(&self, device: &ObjectId) -> Result<Option<GpuFault>> {
+            self.inner.fault_status(device)
+        }
+        fn vram_available(&self, device: &ObjectId) -> Result<usize> {
+            self.inner.vram_available(device)
+        }
+        fn reset_device(&mut self, device: &ObjectId) -> Result<()> {
+            self.inner.reset_device(device)
+        }
+        fn mark_faulted(&mut self, device: &ObjectId, description: String) {
+            self.inner.mark_faulted(device, description)
+        }
+    }
+
+    #[test]
+    fn submit_catches_a_driver_panic_instead_of_crashing() {
+        let driver = PanickingDriver::new(64 * 1024 * 1024);
+        let gpu = driver.device_id();
+        let mut runtime = GraphicsRuntime::new(driver, 16 * 1024 * 1024);
+        let device = runtime.create_device(gpu, &full_caps()).unwrap();
+        let timeline = runtime.create_timeline(&device.id).unwrap();
+        let stream = runtime
+            .create_command_stream(&device.id, WorkloadClass::Graphics)
+            .unwrap();
+        let queue = device.queue(WorkloadClass::Graphics).unwrap();
+
+        // If the panic escaped `submit`, this call itself would unwind the
+        // test thread instead of returning -- reaching the assertions below
+        // at all is part of what this test proves.
+        let result = runtime.submit(&queue, stream, &timeline.id, 1);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("driver panicked"));
+    }
+
+    #[test]
+    fn a_caught_driver_panic_marks_the_device_faulted_and_is_hot_restartable() {
+        let driver = PanickingDriver::new(64 * 1024 * 1024);
+        let gpu = driver.device_id();
+        let mut runtime = GraphicsRuntime::new(driver, 16 * 1024 * 1024);
+        let device = runtime.create_device(gpu, &full_caps()).unwrap();
+        let timeline = runtime.create_timeline(&device.id).unwrap();
+        let stream = runtime
+            .create_command_stream(&device.id, WorkloadClass::Graphics)
+            .unwrap();
+        let queue = device.queue(WorkloadClass::Graphics).unwrap();
+
+        assert!(runtime.submit(&queue, stream, &timeline.id, 1).is_err());
+
+        // The caught panic surfaces through the exact same fault channel a
+        // hardware-reported fault would.
+        assert!(runtime.device_fault(&device.id).unwrap().is_some());
+
+        // Hot-restart: the existing GpuAdmin-gated recovery path tears down
+        // the faulted context without taking down the runtime (or the
+        // process) -- a fresh device can be created and used immediately
+        // after, on the same underlying GPU.
+        runtime.recover_device(&device.id, &admin_caps()).unwrap();
+        assert!(runtime.device(&device.id).is_err());
+
+        let new_device = runtime.create_device(gpu, &full_caps()).unwrap();
+        assert_ne!(new_device.id, device.id);
     }
 
     #[test]

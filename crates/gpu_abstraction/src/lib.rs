@@ -74,6 +74,16 @@ pub trait GpuDriver: HardwareDriver {
     /// — this method is the driver-level half of that; `graphics_runtime`
     /// pairs it with tearing down the runtime-level `GraphicsDevice`.
     fn reset_device(&mut self, device: &ObjectId) -> Result<()>;
+
+    /// Record that `device` has faulted, with `description` explaining why.
+    /// `graphics_runtime::submit` calls this when a driver operation panics
+    /// (caught via `catch_unwind` rather than left to unwind through the
+    /// caller — see that module's doc comment on driver crash containment)
+    /// instead of a hardware-reported fault, so a caught driver panic and a
+    /// real fault surface through the exact same `fault_status`/
+    /// `reset_device`/`recover_device` path: callers don't need a separate
+    /// "did it panic vs. did it report a fault" case.
+    fn mark_faulted(&mut self, device: &ObjectId, description: String);
 }
 
 struct DeviceState {
@@ -300,6 +310,10 @@ impl GpuDriver for SoftwareGpuDriver {
     fn reset_device(&mut self, device: &ObjectId) -> Result<()> {
         self.state_mut(device)?.fault = None;
         Ok(())
+    }
+
+    fn mark_faulted(&mut self, device: &ObjectId, description: String) {
+        self.inject_fault(device, 0, description);
     }
 }
 

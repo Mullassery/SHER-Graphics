@@ -777,7 +777,7 @@ mod tests {
             "expected RGBA8 bytes for a 4x4 image"
         );
 
-        for (i, pixel) in pixels.chunks_exact(4).enumerate() {
+        for (i, pixel) in pixels.as_chunks::<4>().0.iter().enumerate() {
             // Allow +/-2 for UNORM rounding, which is real ICD behavior,
             // not a shortcut in this test.
             assert!(

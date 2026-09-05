@@ -12,7 +12,7 @@ resolver = "2"
 version = "0.3.0"
 edition = "2021"
 authors = ["Georgi Mammen Mullassery <mullassery@gmail.com>"]
-license = "Proprietary License — Free to use with explicit attribution"
+license = "Apache-2.0"
 repository = "https://github.com/Mullassery/SHER-Graphics"
 
 [workspace.dependencies]

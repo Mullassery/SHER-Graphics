@@ -1,12 +1,25 @@
 # SHER Graphics
 
 [![CI](https://github.com/Mullassery/SHER-Graphics/actions/workflows/ci.yml/badge.svg)](https://github.com/Mullassery/SHER-Graphics/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-SHER%20Graphics%20License-blue)](./LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange)](./Cargo.toml)
 
 Native graphics architecture for [SHER Kernel](https://github.com/Mullassery/SHER-KERNEL), built on the same philosophy [Aurora](https://github.com/Mullassery/aurora) applies to the desktop layer:
 
 > Compatibility at the boundary, freedom underneath.
+
+## Use cases
+
+- **Studying a native GPU abstraction designed around a specific kernel's
+  capability/security model**, instead of adapting Vulkan/OpenGL
+  abstractions after the fact.
+- **A hardware-independent software GPU reference** (`gpu_abstraction`'s
+  `SoftwareGpuDriver`) for testing graphics-stack logic without real GPU
+  hardware — 59 tests pass with zero GPU/Vulkan/Mesa dependency.
+- **Not yet a good fit for:** production rendering — the real Vulkan
+  backend exists but isn't wired into the runtime yet (see
+  [Known Issues](#known-issues)), and this repo can't be built standalone
+  (requires `SHER-Kernel` as a sibling directory).
 
 ## Why this exists
 

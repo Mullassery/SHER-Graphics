@@ -120,6 +120,8 @@ crates/
 - **Optional**, for `vulkan_backend`'s tests to exercise a real device instead of skipping: a Vulkan loader + ICD. macOS: `brew install molten-vk vulkan-loader vulkan-tools`. Linux: `mesa-vulkan-drivers`/`vulkan-tools` from your distro (what CI uses). Not required to build — see `crates/vulkan_backend/src/lib.rs`.
 
 Full setup and troubleshooting: [`INSTALLATION.md`](./INSTALLATION.md).
+As-built architecture diagrams (Mermaid): [`docs/architecture/README.md`](./docs/architecture/README.md).
+Honest status/tech-debt supplement to `ARCHITECTURE.md`: [`ROADMAP_HONEST.md`](./ROADMAP_HONEST.md).
 
 ## Building
 
@@ -173,8 +175,16 @@ See the [`Makefile`](./Makefile) (`make help`) for the rest of the dev workflow:
 
 ## Contributing
 
-This is early, architecture-defining work, so the most valuable contributions right now are design feedback and issues, not large PRs against a surface that's still moving. Open an issue if you find a boundary violation, a gap between `ARCHITECTURE.md` and the implementation, or a case the capability model doesn't handle correctly.
+This is early, architecture-defining work, so the most valuable contributions right now are design feedback and issues, not large PRs against a surface that's still moving. Open an issue if you find a boundary violation, a gap between `ARCHITECTURE.md` and the implementation, or a case the capability model doesn't handle correctly. See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the full checklist and scope boundaries, and [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).
+
+## Security
+
+See [`SECURITY.md`](./SECURITY.md) to report a vulnerability. Short version: this is pre-production simulation code with no network exposure; don't treat its capability model as a proven security boundary yet.
 
 ## License
 
 This project is licensed under the [Apache License 2.0](LICENSE).
+
+## Changelog
+
+See [`CHANGELOG.md`](./CHANGELOG.md).

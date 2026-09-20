@@ -110,11 +110,16 @@ cargo test -- --nocapture
 cargo doc --open
 ```
 
-Expected: 61 tests passing, zero warnings from this workspace's own crates
+Expected: 59 tests passing in the software-driver crates
+(`graphics_api`/`gpu_abstraction`/`graphics_runtime`/`graphics_compat`,
+`cargo test --workspace --exclude vulkan_backend`) plus 4 more in
+`vulkan_backend` (63 total), zero warnings from this workspace's own crates
 (pre-existing warnings from `sher_objectmodel` in SHER-Kernel are unrelated
 and safe to ignore). If no Vulkan loader is installed, `vulkan_backend`'s
 GPU-dependent tests still count as passing — they detect that up front and
-skip, per its module docs.
+skip, per its module docs; with a loader present (verified on this repo's
+CI and against a real MoltenVK device during this pass) all 4 run for
+real instead of skipping.
 
 ---
 

@@ -1,8 +1,12 @@
 # Rust
 /target/
-Cargo.lock
 **/*.rs.bk
 *.pdb
+
+# Cargo.lock is committed deliberately: this workspace ships binaries/
+# examples (crates/graphics_runtime/examples/triangle.rs), so the lockfile
+# is tracked for reproducible builds, per Rust's own guidance for
+# non-library crates.
 
 # IDE
 .vscode/

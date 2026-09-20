@@ -1,0 +1,57 @@
+name: Bug report
+description: Something in SHER Graphics doesn't work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: this repo cannot build standalone (it depends on
+        `SHER-Kernel` via a relative-path sibling checkout). Confirm your
+        setup matches `INSTALLATION.md` first.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What you expected vs. what actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands, including which crate(s) are involved.
+      placeholder: |
+        cargo test -p graphics_runtime
+        ...
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit / version
+      description: "`git rev-parse HEAD` in SHER-Graphics, and in SHER-Kernel if relevant."
+    validations:
+      required: true
+  - type: input
+    id: rust-version
+    attributes:
+      label: Rust version
+      description: Output of `rustc --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Full `cargo build`/`cargo test` output if it's a build/test failure. This will be rendered as code automatically.
+      render: shell

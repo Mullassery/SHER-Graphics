@@ -72,3 +72,26 @@ jobs:
       - name: cargo clippy
         working-directory: SHER-Graphics
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout SHER-Graphics
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      # Scans Cargo.lock against the RustSec advisory database. This repo
+      # has one non-workspace-internal dependency (ash, in
+      # crates/vulkan_backend) plus its transitive deps (libloading,
+      # cfg-if) — everything else is a `sher_*`/`hal`/`gpu_driver` path
+      # dependency on the sibling SHER-Kernel checkout, which isn't on
+      # crates.io and so isn't in the advisory database either way.
+      - name: cargo audit
+        run: cargo audit

@@ -39,6 +39,21 @@ pub enum DrmRequest {
     /// stands in for.
     PrimeHandleToFd { handle: ObjectId },
     /// Analogous to `DRM_IOCTL_MODE_GETRESOURCES`.
+    ///
+    /// **Unimplemented stub, by design, not by oversight.** The handler for
+    /// this request always returns an empty resource list
+    /// (`DrmResponse::Resources(Vec::new())`) regardless of what
+    /// devices/connectors actually exist in the wrapped `GraphicsRuntime` —
+    /// it does not query real connector/CRTC/encoder state at all. This is
+    /// intentional for a reference/compat shim with no real DRM-ioctl wire
+    /// format behind it yet (see the module docs), but it means: if
+    /// anything ever expects this to enumerate real mode resources (e.g. a
+    /// real Mesa winsys pointed at this shim), it will silently see zero
+    /// resources rather than an error. As of this writing nothing in
+    /// SHER-Graphics, SHER-Display, or SHER-Kernel calls this — see
+    /// `ROADMAP_HONEST.md` for the verified-empty-callers note. Implementing
+    /// real enumeration is real feature work (querying actual connector
+    /// state), not a quick fix, and is intentionally out of scope here.
     ModeGetResources,
 }
 
@@ -77,6 +92,9 @@ impl<'a, D: GpuDriver> DrmCompatShim<'a, D> {
                 Ok(DrmResponse::Closed)
             }
             DrmRequest::PrimeHandleToFd { handle } => Ok(DrmResponse::PrimeFd(handle)),
+            // Unimplemented stub by design: see the doc comment on
+            // `DrmRequest::ModeGetResources`. Always empty, never queries
+            // real connector/CRTC/encoder state.
             DrmRequest::ModeGetResources => Ok(DrmResponse::Resources(Vec::new())),
         }
     }

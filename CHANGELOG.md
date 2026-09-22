@@ -29,6 +29,28 @@ commit-level history.
   builds.
 - `INSTALLATION.md` claimed 61 total tests; actual current count is 63
   (59 in the software-driver crates + 4 in `vulkan_backend`).
+- `graphics_compat::DrmRequest::ModeGetResources`
+  (`crates/graphics_compat/src/lib.rs:41`) always silently returned an
+  empty resource list with no indication this was a stub rather than a
+  real (if currently trivial) implementation. Re-verified zero callers
+  exist anywhere in this repo or in `SHER-Display`/`SHER-Kernel` (the
+  latter declares a `graphics_compat` path dependency but its own
+  architecture docs mark it "declared; not yet called — Phase 3"), so
+  this pass adds an explicit doc comment disclosing the always-empty
+  behavior as intentional-but-unimplemented, without attempting the real
+  DRM resource enumeration itself (that requires actual hardware I/O and
+  is out of scope for a quick fix).
+- `cargo audit` was previously "added but unverified" (no network access
+  in that pass). Ran it for real this pass: fetched the RustSec advisory
+  database (1,258 advisories), scanned all 65 `Cargo.lock` dependencies —
+  **zero vulnerabilities found**, exit code 0.
+- Re-verified the "124 `.unwrap()`/`.expect()` sites, exactly one in
+  production code" claim with a fresh grep: still accurate. The one
+  production site remains `crates/gpu_abstraction/src/lib.rs:169`,
+  unchanged; everything else is in `#[cfg(test)]` modules or
+  `crates/graphics_runtime/examples/triangle.rs`, plus one line
+  (`crates/graphics_runtime/src/lib.rs:428`) that only mentions
+  `.unwrap()` inside a doc comment, not as code.
 
 ## [0.3.0] - 2026-09-06
 

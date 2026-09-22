@@ -8,6 +8,15 @@ what actually works, what's tested, and what's simply not built — as of
 **2026-09-20**, verified by running the commands below myself in this
 pass, not by re-reading old commit messages.
 
+**Quick-fix follow-up pass, 2026-09-22**: re-ran the full validation suite
+(fmt/build/test/clippy/triangle example — all still green, 63/63 tests),
+ran `cargo audit` for real (network was available this time — see the
+technical-debt section below), re-verified the `.unwrap()`/`.expect()`
+count and the `ModeGetResources` zero-callers claim with fresh greps, and
+disclosed the `ModeGetResources` stub in-line via doc comments. No new
+behavior was implemented; see `CHANGELOG.md`'s `[Unreleased]` section for
+the exact diff.
+
 ## Bucket 1 — Built and verified working (by me, this pass)
 
 Commands run, real output, no cherry-picking:
@@ -65,15 +74,23 @@ Functionally, this means the following are real and tested, not aspirational:
   already in the README's "Known Issues"; confirmed still true.
 - **`graphics_compat`'s `DrmCompatShim` is a reference shim, not a real
   DRM-ioctl implementation.** It's honestly documented as such in its
-  module docs (`crates/graphics_compat/src/lib.rs:1-23`), but concretely:
-  `DrmRequest::ModeGetResources` **always returns an empty `Vec`**
+  module docs (`crates/graphics_compat/src/lib.rs:1-23`), and, as of this
+  pass, in an explicit doc comment on `DrmRequest::ModeGetResources`
+  itself: `DrmRequest::ModeGetResources` **always returns an empty `Vec`**
   regardless of what devices/connectors exist
-  (`crates/graphics_compat/src/lib.rs:80`) — it never actually queries the
-  underlying `GraphicsRuntime`/`GPUDriver` for real connector data. If
-  anyone ever tries to point a real Mesa winsys at this shim expecting
-  `ModeGetResources` to enumerate anything, it will silently report zero
-  resources. Low risk today (nothing consumes this crate yet), but worth
-  fixing before this shim is ever used for anything beyond its own tests.
+  (`crates/graphics_compat/src/lib.rs:43-57`, handler at `:98`) — it
+  never actually queries the underlying `GraphicsRuntime`/`GPUDriver` for
+  real connector data. **Re-verified this pass**: grepped this repo plus
+  `SHER-Display` and `SHER-Kernel` for `ModeGetResources`/`DrmCompatShim`
+  — zero callers anywhere outside `graphics_compat`'s own tests.
+  `SHER-Display/Cargo.toml` declares a `graphics_compat` path dependency,
+  but `SHER-Display/docs/architecture/README.md` itself marks that edge
+  "declared; not yet called — Phase 3." If anyone ever tries to point a
+  real Mesa winsys at this shim expecting `ModeGetResources` to enumerate
+  anything, it will silently report zero resources — this is now disclosed
+  in-line via doc comments rather than only in this file. Still not
+  implemented (real enumeration needs actual hardware I/O and remains real
+  feature work), and still low risk today since nothing consumes it.
 - **`graphics_compat::DrmRequest::PrimeHandleToFd` does not return a real
   file descriptor** — it returns the resource's `ObjectId` standing in for
   one (`crates/graphics_compat/src/lib.rs:79`, and the module docs say so
@@ -112,21 +129,21 @@ Functionally, this means the following are real and tested, not aspirational:
 Ordered roughly by how much a dedicated follow-up session would need to
 do about it.
 
-1. **No dependency/security audit CI job existed before this pass.**
-   `.github/workflows/ci.yml` ran fmt/build/test/clippy but never checked
-   the dependency tree against the RustSec advisory database. Added a
-   `cargo-audit` job in this pass (see `.github/workflows/ci.yml`); it has
-   not yet had a chance to run in CI (no push to `main` has happened
-   since), so its first real result is unverified. **Follow-up-worthy**:
-   confirm it actually runs green (or triages a real finding) after the
-   next push.
-2. **Dependency freshness is unverified.** This sandbox has no network
-   access to crates.io, so `cargo audit`/`cargo outdated`-equivalent
-   checks could not be run here. Only dependency in this workspace outside
-   the `sher_*`/`hal`/`gpu_driver` path family is `ash 0.38` (plus its
-   transitive `libloading`/`cfg-if`) in `crates/vulkan_backend/Cargo.toml`.
-   **Follow-up-worthy**: run `cargo audit` with network access once CI
-   proves it out, or manually from a machine with crates.io access.
+1. **`cargo-audit` CI job status: RESOLVED THIS PASS.** The job added in
+   the previous pass hadn't run against `main` yet, so its result was
+   unverified. This pass had network access and ran `cargo audit` for
+   real, locally: fetched the RustSec advisory database (1,258 advisories
+   loaded), scanned all 65 dependencies in `Cargo.lock` — **zero
+   vulnerabilities found**, exit code 0. This doesn't confirm the *CI job
+   itself* is wired correctly (that still needs a real push to `main` to
+   verify the GitHub Actions environment specifically), but it does
+   confirm the dependency tree is currently clean.
+2. **Dependency freshness: RESOLVED THIS PASS (previously blocked on no
+   network access).** Ran `cargo audit` with real network access this
+   pass — see item 1. Only dependency in this workspace outside the
+   `sher_*`/`hal`/`gpu_driver` path family is `ash 0.38` (plus its
+   transitive `libloading`/`cfg-if`) in `crates/vulkan_backend/Cargo.toml`;
+   none flagged.
 3. **`crates/graphics_runtime/src/lib.rs` is 1,361 lines** — the largest
    file in the workspace by a wide margin (`graphics_api` is 354,
    `gpu_abstraction` 493, `vulkan_backend` 825, `graphics_compat` 156). It
@@ -138,15 +155,25 @@ do about it.
    `device.rs`, `submit.rs`, `cursor.rs`, `fault.rs`) before adding
    anything else non-trivial to this crate.
 4. **`graphics_compat::DrmRequest::ModeGetResources` always returns an
-   empty list** (`crates/graphics_compat/src/lib.rs:80`) — see Bucket 2.
-   Small, contained fix once someone actually needs it; not fixed in this
-   pass because nothing consumes this crate yet and it's honestly
-   documented as a reference shim already.
+   empty list** (`crates/graphics_compat/src/lib.rs:43-57`, handler
+   `:98`) — see Bucket 2. **Disclosure fixed this pass**: added an
+   explicit doc comment on the enum variant and a short comment on the
+   handler arm stating this is an unimplemented stub by design, not an
+   oversight, plus a pointer to this file. The actual behavior
+   (always-empty) is unchanged and still not fixed — real DRM resource
+   enumeration is real feature work requiring actual hardware I/O, out of
+   scope for a disclosure-only pass, and nothing consumes this crate yet
+   (re-verified via fresh grep across this repo, `SHER-Display`, and
+   `SHER-Kernel`).
 5. **124 `.unwrap()`/`.expect()` call sites across `crates/**/*.rs`.**
+   **Re-verified this pass with a fresh grep**: count is still exactly
+   124, and the "exactly one in production code" claim still holds.
    Spot-checked: the overwhelming majority are inside `#[cfg(test)]`
    modules and `crates/graphics_runtime/examples/triangle.rs` (example
-   code, where `.expect()` with a clear message is idiomatic). Exactly one
-   production, non-test `.expect()` was found:
+   code, where `.expect()` with a clear message is idiomatic); one line
+   (`crates/graphics_runtime/src/lib.rs:428`) is a doc comment that only
+   mentions `.unwrap()` in prose, not an actual call. The one production,
+   non-test `.expect()` is still:
    `crates/gpu_abstraction/src/lib.rs:169` — `.expect("SoftwareGpuDriver
    constructed with zero devices")`, guarding an internal invariant that
    the driver is always built with at least one device. Not a bug today
@@ -170,15 +197,24 @@ do about it.
 
 ## Explicitly not fixed in this pass (deliberate, documentation-first)
 
-- `graphics_compat::ModeGetResources`'s always-empty response (item 4
-  above) — real but small implementation work, deferred to a dedicated
-  session per this pass's scope (disclosure, not fix-everything).
+- `graphics_compat::ModeGetResources`'s always-empty *behavior* (item 4
+  above) — the disclosure (doc comments) was fixed this pass; the
+  underlying always-empty implementation is real but small feature work
+  (needs actual connector/CRTC/encoder state to query), deliberately
+  deferred to a dedicated session per this pass's quick-fix-only scope.
 - `graphics_runtime`'s file-size/module-split debt (item 3) — a
   non-trivial refactor, deferred.
+- `PrimeHandleToFd` returning an `ObjectId` instead of a real fd — by
+  design, already documented in the module and enum docs; skipped per
+  this pass's explicit scope.
 - Wiring `vulkan_backend` into `gpu_abstraction::GpuDriver` — already
   correctly identified in the existing README/`ARCHITECTURE.md` as
   "real, separate design work," and this pass agrees with that framing;
   not attempted here.
-- Verifying the new `cargo-audit` CI job actually goes green — cannot be
-  done without pushing and watching CI, which this pass does not do (no
-  push was performed; see final report).
+- Verifying the new `cargo-audit` CI job specifically goes green *in
+  GitHub Actions* — this pass ran `cargo audit` for real, locally (see
+  item 1: 65 dependencies scanned, zero vulnerabilities), which is a
+  stronger result than the previous pass had, but confirming the GitHub
+  Actions job itself executes correctly still requires a real push to
+  `main`, which this pass does not do (no push performed; see final
+  report).

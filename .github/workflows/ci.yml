@@ -10,19 +10,25 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      # SHER-Kernel is consumed via relative path dependencies
-      # (../SHER-Kernel/crates/...), so it must be checked out as a sibling
-      # directory under the same workspace root as SHER-Graphics.
+      # SHER-KERNEL is consumed via relative path dependencies
+      # (../SHER-KERNEL/crates/...), so it must be checked out as a sibling
+      # directory under the same workspace root as SHER-Graphics, using the
+      # real repo's exact casing (all-caps on GitHub). Cargo.toml was fixed
+      # to point at ../SHER-KERNEL (was ../SHER-Kernel, which only resolved
+      # on case-insensitive filesystems); this checkout path must match or
+      # CI breaks on the next push since actions/checkout's `path:` creates
+      # a local directory with whatever name you give it, independent of
+      # the real repo name.
       - name: Checkout SHER-Graphics
         uses: actions/checkout@v4
         with:
           path: SHER-Graphics
 
-      - name: Checkout SHER-Kernel
+      - name: Checkout SHER-KERNEL
         uses: actions/checkout@v4
         with:
           repository: Mullassery/SHER-KERNEL
-          path: SHER-Kernel
+          path: SHER-KERNEL
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

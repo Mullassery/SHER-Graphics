@@ -37,12 +37,15 @@ git --version
 
 SHER Graphics depends on `sher_common`, `sher_objectmodel`, `hal`, and
 `gpu_driver` from SHER Kernel via **relative path dependencies**
-(`../SHER-Kernel/crates/...`), not published crates. Both repositories must
-be checked out as siblings:
+(`../SHER-KERNEL/crates/...`), not published crates. Both repositories must
+be checked out as siblings, with the sibling directory name matching the
+real repo name **exactly**, including case — `cargo` path resolution is
+case-sensitive on Linux even though it silently tolerates a mismatch on
+case-insensitive filesystems like macOS/APFS:
 
 ```
 ~/
-├── SHER-Kernel/
+├── SHER-KERNEL/
 └── SHER-Graphics/
 ```
 
@@ -53,7 +56,7 @@ git clone https://github.com/Mullassery/SHER-KERNEL.git
 git clone https://github.com/Mullassery/SHER-Graphics.git
 ```
 
-They must sit side by side — if you already have `SHER-Kernel` checked out
+They must sit side by side — if you already have `SHER-KERNEL` checked out
 elsewhere, symlink or re-clone it as a sibling of `SHER-Graphics` rather
 than editing the path dependencies.
 
@@ -159,14 +162,18 @@ cargo test -p vulkan_backend -- --nocapture
 
 ### `failed to load source for dependency 'sher_common'` / path errors
 
-`SHER-Kernel` isn't checked out as a sibling directory, or is checked out
-under a different name. Confirm:
+`SHER-KERNEL` isn't checked out as a sibling directory, or is checked out
+under a different name — including a different **case**: `../SHER-Kernel`
+(mixed case) is a different path from `../SHER-KERNEL` (all caps) on a
+case-sensitive filesystem (Linux), even though both look identical and both
+work on macOS/APFS. Confirm:
 
 ```bash
-ls ../SHER-Kernel/crates/common/Cargo.toml
+ls ../SHER-KERNEL/crates/common/Cargo.toml
 ```
 
-If that fails, clone `SHER-Kernel` next to `SHER-Graphics` (step 1 above).
+If that fails, clone `SHER-KERNEL` next to `SHER-Graphics` (step 1 above),
+using that exact directory name.
 
 ### Build failures after pulling new changes
 
@@ -177,8 +184,8 @@ cargo build
 ```
 
 If the failure is inside a `sher_*`/`hal`/`gpu_driver` type, check whether
-`SHER-Kernel` has moved ahead of what this repo's `Cargo.lock` expects —
-`git -C ../SHER-Kernel log --oneline -5` to see what changed.
+`SHER-KERNEL` has moved ahead of what this repo's `Cargo.lock` expects —
+`git -C ../SHER-KERNEL log --oneline -5` to see what changed.
 
 ### `cargo test` hangs or is slow
 

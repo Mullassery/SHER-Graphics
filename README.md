@@ -74,8 +74,10 @@ family:
 
 - **SHER-Kernel** — foundation. This repo depends on it (`sher_common`,
   `sher_objectmodel`, `sher_security`, `hal`, `gpu_driver`) via relative
-  path (`../SHER-Kernel/crates/...`), so both repos must be sibling
-  directories.
+  path (`../SHER-KERNEL/crates/...` — the sibling directory name must match
+  the real repo's casing exactly; `cargo` path resolution is case-sensitive
+  on Linux even though a mismatch silently works on macOS/APFS), so both
+  repos must be sibling directories.
 - **SHER-Input** — standalone, no dependency on this repo or vice versa.
 - **SHER-Display** — depends on this repo (`graphics_api`,
   `gpu_abstraction`, `graphics_runtime`, `graphics_compat`) in addition to
@@ -116,7 +118,7 @@ crates/
 ## Prerequisites
 
 - Rust 1.75+
-- [`SHER-Kernel`](https://github.com/Mullassery/SHER-KERNEL) checked out as a **sibling directory** (`../SHER-Kernel` relative to this repo) — `sher_common`, `sher_objectmodel`, `sher_security`, `hal`, and `gpu_driver` are consumed via relative path dependencies, not published crates yet
+- [`SHER-KERNEL`](https://github.com/Mullassery/SHER-KERNEL) checked out as a **sibling directory named exactly `SHER-KERNEL`** (`../SHER-KERNEL` relative to this repo) — `sher_common`, `sher_objectmodel`, `sher_security`, `hal`, and `gpu_driver` are consumed via relative path dependencies, not published crates yet
 - **Optional**, for `vulkan_backend`'s tests to exercise a real device instead of skipping: a Vulkan loader + ICD. macOS: `brew install molten-vk vulkan-loader vulkan-tools`. Linux: `mesa-vulkan-drivers`/`vulkan-tools` from your distro (what CI uses). Not required to build — see `crates/vulkan_backend/src/lib.rs`.
 
 Full setup and troubleshooting: [`INSTALLATION.md`](./INSTALLATION.md).
@@ -143,8 +145,9 @@ See the [`Makefile`](./Makefile) (`make help`) for the rest of the dev workflow:
   driver's synchronous trait shape is tracked as follow-up work, not done.
 - `graphics_compat` (the Mesa winsys/WSI compatibility seam) models the
   planned Phase A seam but is not backed by a real Mesa build yet.
-- This workspace depends on `SHER-Kernel` via relative path (`../SHER-Kernel`),
-  not a published crate, so it cannot be built or published standalone —
+- This workspace depends on `SHER-Kernel` via relative path (`../SHER-KERNEL`,
+  case-sensitive on Linux), not a published crate, so it cannot be built or
+  published standalone —
   no crates.io registry drift check applies to a systems component with no
   independent publish target.
 - No open GitHub issues and no `TODO`/`FIXME` markers in `crates/` as of

@@ -16,8 +16,12 @@ license = "Apache-2.0"
 repository = "https://github.com/Mullassery/SHER-Graphics"
 
 [workspace.dependencies]
-sher_common = { path = "../SHER-Kernel/crates/common" }
-sher_objectmodel = { path = "../SHER-Kernel/crates/objectmodel" }
-sher_security = { path = "../SHER-Kernel/crates/security" }
-hal = { path = "../SHER-Kernel/crates/hal" }
-gpu_driver = { path = "../SHER-Kernel/crates/gpu_driver" }
+# NOTE: real repo is "SHER-KERNEL" (all caps, github.com/Mullassery/SHER-KERNEL).
+# "SHER-Kernel" only resolves on case-insensitive filesystems (macOS/APFS); it
+# fails `cargo check` on any case-sensitive Linux filesystem. See SHER-Display's
+# Cargo.toml for the verified repro (built in a real ubuntu:24.04 container).
+sher_common = { path = "../SHER-KERNEL/crates/common" }
+sher_objectmodel = { path = "../SHER-KERNEL/crates/objectmodel" }
+sher_security = { path = "../SHER-KERNEL/crates/security" }
+hal = { path = "../SHER-KERNEL/crates/hal" }
+gpu_driver = { path = "../SHER-KERNEL/crates/gpu_driver" }

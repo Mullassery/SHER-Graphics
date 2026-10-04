@@ -11,7 +11,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PARENT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
-SHER_KERNEL_DIR="$PARENT_DIR/SHER-Kernel"
+# NOTE: must match Cargo.toml's path deps exactly ("../SHER-KERNEL/...").
+# The real repo is "SHER-KERNEL" (all caps, github.com/Mullassery/SHER-KERNEL);
+# a mismatched-case directory name here only "works" on case-insensitive
+# filesystems (macOS/APFS) and silently breaks `cargo build` on real Linux.
+SHER_KERNEL_DIR="$PARENT_DIR/SHER-KERNEL"
 SHER_KERNEL_URL="https://github.com/Mullassery/SHER-KERNEL.git"
 MIN_RUST_MINOR=75
 

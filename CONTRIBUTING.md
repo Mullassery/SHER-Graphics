@@ -18,8 +18,10 @@ Open an issue if you find:
 ## Before you open a PR
 
 This repo cannot be built standalone — it depends on
-[`SHER-Kernel`](https://github.com/Mullassery/SHER-KERNEL) via relative
-path (`../SHER-Kernel`), so both repos must be checked out as sibling
+[`SHER-KERNEL`](https://github.com/Mullassery/SHER-KERNEL) via relative
+path (`../SHER-KERNEL` — the sibling directory name must match that casing
+exactly; a mismatch only works on case-insensitive filesystems like
+macOS/APFS, not on Linux), so both repos must be checked out as sibling
 directories. See [`INSTALLATION.md`](./INSTALLATION.md) for setup.
 
 For any PR touching code:

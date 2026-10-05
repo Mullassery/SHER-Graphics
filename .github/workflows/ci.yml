@@ -20,12 +20,12 @@ jobs:
       # a local directory with whatever name you give it, independent of
       # the real repo name.
       - name: Checkout SHER-Graphics
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: SHER-Graphics
 
       - name: Checkout SHER-KERNEL
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Mullassery/SHER-KERNEL
           path: SHER-KERNEL
@@ -83,7 +83,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout SHER-Graphics
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

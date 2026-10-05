@@ -136,6 +136,26 @@ cargo test
 
 See the [`Makefile`](./Makefile) (`make help`) for the rest of the dev workflow: `fmt`, `clippy`, `doc`, `clean`.
 
+## Linux / Ubuntu compatibility
+
+Verified 2026-10 (see org-wide `SHER-LINUX-RUST-COMPATIBILITY.md`):
+
+- **Ubuntu**: 24.04 LTS and 26.04 LTS, confirmed via real Docker containers.
+- **Architecture**: x86_64 and arm64, both confirmed.
+- **Fixed this pass**: the sibling-path dependency on `SHER-KERNEL` used mixed-case
+  `../SHER-Kernel` in `Cargo.toml`, which resolved fine on case-insensitive macOS/APFS but
+  broke `cargo check` outright on any case-sensitive Linux filesystem — i.e. every real
+  Ubuntu install. Corrected to the real `../SHER-KERNEL` casing; CI's checkout `path:` had
+  the same stale casing and was fixed too.
+- **Vulkan**: extensions are runtime-probed (`enumerate_instance_extension_properties`),
+  never assumed present. On Ubuntu, `mesa-vulkan-drivers`/`vulkan-tools` provide a working
+  ICD for `vulkan_backend`'s hardware-exercising tests; the software reference path needs
+  no GPU at all.
+- **Known limitations**: `vulkan_backend` is real but not yet wired into
+  `gpu_abstraction::GpuDriver` (see below); the software rasterizer is intentionally scalar
+  (a correctness reference, not a production renderer) — no SIMD yet, tracked as a future
+  enhancement, not a defect.
+
 ## Known Issues
 
 - `vulkan_backend` is real but standalone: it is not yet wired into

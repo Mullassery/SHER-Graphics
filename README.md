@@ -8,6 +8,17 @@ Native graphics architecture for [SHER Kernel](https://github.com/Mullassery/SHE
 
 > Compatibility at the boundary, freedom underneath.
 
+A pure-Rust software GPU reference driver, a capability-secured graphics runtime, and a
+real Vulkan/`ash` FFI backend — developed side by side, not as a Vulkan wrapper with native
+bits bolted on.
+
+**Contents:** [Use cases](#use-cases) · [Why this exists](#why-this-exists) ·
+[What exists today](#what-exists-today) · [Architecture](#architecture-at-a-glance) ·
+[Cross-repo compatibility](#cross-repo-compatibility-verified-whole-family) ·
+[Workspace](#workspace) · [Building](#building) ·
+[Linux/Ubuntu compatibility](#linux--ubuntu-compatibility) ·
+[Known Issues](#known-issues)
+
 ## Use cases
 
 - **Studying a native GPU abstraction designed around a specific kernel's
@@ -63,6 +74,20 @@ Real today, separately: vulkan_backend (ash) → real Vulkan loader/ICD → real
 ```
 
 `ARCHITECTURE.md` covers the full layering: the native API/runtime/abstraction split, the Mesa winsys/WSI integration strategy, the security and capability model, and the phased migration path from LKI-hosted Linux GPU drivers to native SHER drivers.
+
+## The SHER family
+
+This repo is one part of the SHER platform. For discoverability (including by anyone or
+anything — human or AI agent — landing on just one of these repos), here are all the others:
+
+- [SHER-KERNEL](https://github.com/Mullassery/SHER-KERNEL) — capability-based object model, scheduler, memory, driver lifecycle
+- [SHER-Process-Explorer](https://github.com/Mullassery/SHER-Process-Explorer) — Linux process telemetry and evidence-based "why" investigation
+- [SHER-INPUT](https://github.com/Mullassery/SHER-INPUT) — canonical input event normalization (keyboard/pointer/touch/tablet/gamepad)
+- [SHER-Display](https://github.com/Mullassery/SHER-Display) — compositor/display server, consumes this repo's graphics API
+- [SHER-Aurora](https://github.com/Mullassery/SHER-Aurora) — GNOME/GTK4-oriented Rust design system
+
+(This list is discoverability only — see [Cross-repo compatibility](#cross-repo-compatibility-verified-whole-family)
+right below for which of these this repo actually depends on at the Cargo level.)
 
 ## Cross-repo compatibility (verified, whole family)
 
@@ -151,10 +176,9 @@ Verified 2026-10 (see org-wide `SHER-LINUX-RUST-COMPATIBILITY.md`):
   never assumed present. On Ubuntu, `mesa-vulkan-drivers`/`vulkan-tools` provide a working
   ICD for `vulkan_backend`'s hardware-exercising tests; the software reference path needs
   no GPU at all.
-- **Known limitations**: `vulkan_backend` is real but not yet wired into
-  `gpu_abstraction::GpuDriver` (see below); the software rasterizer is intentionally scalar
-  (a correctness reference, not a production renderer) — no SIMD yet, tracked as a future
-  enhancement, not a defect.
+- The software rasterizer is intentionally scalar (a correctness reference, not a
+  production renderer) — no SIMD yet, tracked as a future enhancement, not a defect.
+  See [Known Issues](#known-issues) for the rest (unwired Vulkan backend, unbuilt Mesa seam).
 
 ## Known Issues
 

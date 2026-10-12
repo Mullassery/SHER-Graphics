@@ -29,3 +29,5 @@ Thumbs.db
 # Project specific
 *.log
 debug/
+
+graphify-out/

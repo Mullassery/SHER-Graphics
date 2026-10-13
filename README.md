@@ -1,239 +1,111 @@
 # SHER Graphics
 
-[![Graphify](https://img.shields.io/badge/Graphify-knowledge%20graph-blue)](https://github.com/Graphify-Labs/graphify)
+Native graphics architecture for [SHER Kernel](https://github.com/Mullassery/SHER-KERNEL): a pure-Rust software GPU reference driver, a capability-secured graphics runtime, and a real Vulkan/`ash` FFI backend.
 
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![CI](https://github.com/Mullassery/SHER-Graphics/actions/workflows/ci.yml/badge.svg)](https://github.com/Mullassery/SHER-Graphics/actions/workflows/ci.yml)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange)](./Cargo.toml)
 
-Native graphics architecture for [SHER Kernel](https://github.com/Mullassery/SHER-KERNEL), built on the same philosophy [Aurora](https://github.com/Mullassery/aurora) applies to the desktop layer:
+## What it is
 
-> Compatibility at the boundary, freedom underneath.
+SHER Graphics is a pure-Rust graphics stack designed around SHER Kernel's capability/security model rather than as a Vulkan wrapper with native bits bolted on. It is a five-crate workspace consisting of a hardware-independent software GPU simulation (the bulk of the code) and a genuine Vulkan/`ash` backend developed alongside it, not as a shim over the software driver.
 
-A pure-Rust software GPU reference driver, a capability-secured graphics runtime, and a
-real Vulkan/`ash` FFI backend — developed side by side, not as a Vulkan wrapper with native
-bits bolted on.
+Most of the workspace plays the role `llvmpipe`/`lavapipe` play for Mesa: a correctness baseline the rest of the stack is built and tested against. About 59 tests pass with zero GPU hardware, zero Vulkan, and zero Mesa dependency in the loop (`cargo test --workspace --exclude vulkan_backend`).
 
-**Contents:** [Use cases](#use-cases) · [Why this exists](#why-this-exists) ·
-[What exists today](#what-exists-today) · [Architecture](#architecture-at-a-glance) ·
-[Cross-repo compatibility](#cross-repo-compatibility-verified-whole-family) ·
-[Workspace](#workspace) · [Building](#building) ·
-[Linux/Ubuntu compatibility](#linux--ubuntu-compatibility) ·
-[Known Issues](#known-issues)
+## Features / Highlights
 
-## Use cases
+- **Native graphics API** — device, resource, pipeline, command-stream, and timeline object model (`graphics_api`).
+- **GPU abstraction layer** with multi-GPU support and an in-process software reference driver (`gpu_abstraction`).
+- **Command-stream validation, GPU fault detection, and isolated per-context fault recovery** — one context's failure does not take down others.
+- **Driver panic containment** — `graphics_runtime::submit` catches a panic inside driver code (`catch_unwind`), marks the device faulted through the same `GpuFault` channel a hardware fault uses, and lets the existing `recover_device` path hot-restart it; a fresh device can be created and used immediately, without crashing the process.
+- **Capability-gated operations** — device creation, submission, and admin/recovery reuse SHER Kernel's existing capability and tier model, and every grant/denial flows into an audit trail.
+- **Cursor rendering primitives** — `set_cursor_image`, `set_cursor_position`, `show_cursor`, `hide_cursor` own how the cursor is drawn without owning position tracking, focus, or input (those stay in SHER-INPUT/SHER-Display).
+- **A real Vulkan backend** (`vulkan_backend`) — genuine `ash` FFI bindings against a real Vulkan loader/ICD: real physical-device enumeration via `vkEnumeratePhysicalDevices` and a real offscreen clear-color render (allocate `VkImage`, record/submit a command buffer, wait on a fence, read pixels back and assert their bytes).
+- **End-to-end example** — `cargo run -p graphics_runtime --example triangle` walks device → shaders → pipeline → resource → validated command stream → submit → wait → present.
 
-- **Studying a native GPU abstraction designed around a specific kernel's
-  capability/security model**, instead of adapting Vulkan/OpenGL
-  abstractions after the fact.
-- **A hardware-independent software GPU reference** (`gpu_abstraction`'s
-  `SoftwareGpuDriver`) for testing graphics-stack logic without real GPU
-  hardware — 59 tests pass with zero GPU/Vulkan/Mesa dependency.
-- **Not yet a good fit for:** production rendering — the real Vulkan
-  backend exists but isn't wired into the runtime yet (see
-  [Known Issues](#known-issues)), and this repo can't be built standalone
-  (requires `SHER-Kernel` as a sibling directory).
+## Who it's for / Use cases
 
-## Why this exists
+- **Studying a native GPU abstraction designed around a specific kernel's capability/security model**, instead of adapting Vulkan/OpenGL abstractions after the fact.
+- **A hardware-independent software GPU reference** (`gpu_abstraction`'s `SoftwareGpuDriver`) for testing graphics-stack logic without real GPU hardware.
+- **Building and testing a real Vulkan path** without requiring a GPU to build the workspace — `vulkan_backend` compiles and tests cleanly with no Vulkan loader installed at all.
 
-Most OS graphics stacks are built as a Vulkan or OpenGL implementation first, with anything native bolted on afterward, if it exists at all. SHER Graphics inverts that: the goal is a native runtime, GPU abstraction, memory model, and synchronization primitives designed for SHER Kernel specifically, not constrained by decades of Vulkan/OpenGL/Direct3D API-versioning baggage — with OpenGL and Vulkan support as compatibility-facing interfaces at the boundary, layered on top once there's a real driver underneath to target. That Mesa integration (`graphics_compat`, section 5 of `ARCHITECTURE.md`) is **planned, not built**: see "What exists today" below for exactly what runs now.
+## What it is not
 
-See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full design: philosophy, why this isn't "just another Vulkan," the native API/runtime/abstraction layering, the Mesa integration strategy, the driver migration path, and the phased roadmap.
+- **Not yet a production renderer.** The real Vulkan backend exists but is not wired into `gpu_abstraction::GpuDriver`/`graphics_runtime::GraphicsRuntime`; nothing in the runtime/API layers currently routes through it. Bridging its asynchronous, device-lost-capable semantics into the software driver's synchronous trait shape is tracked follow-up work, not done.
+- **Not a Mesa/OpenGL integration yet.** `graphics_compat` (the Mesa winsys/WSI compatibility seam) models the planned Phase A seam but is not backed by a real Mesa build.
+- **Not a standalone build.** It depends on `SHER-KERNEL` via a relative path (`../SHER-KERNEL`, case-sensitive on Linux), so that repo must be a sibling directory; there is no crates.io publish target.
+- **Not OS-level sandboxing.** Panic containment is in-process only — there is no subprocess/WASM/eBPF isolation in this workspace; the real sandbox mechanism lives in SHER-Kernel's `driver_runtime` and is not yet built.
+- **Not vectorized.** The software rasterizer is intentionally scalar (a correctness reference, not a production renderer) — no SIMD yet, tracked as a future enhancement.
 
-## What exists today
+## Project status
 
-Two things, honestly labeled, alongside each other:
+- **Implemented and tested:** `graphics_api`, `gpu_abstraction`, `graphics_runtime` (including panic containment and fault recovery), `graphics_compat` (thin compatibility seam), and the standalone `vulkan_backend` (device enumeration + offscreen clear-color render).
+- **Real but not yet integrated:** `vulkan_backend` is deliberately not wired into the runtime/API layers.
+- **Not built:** the Mesa/OpenGL compatibility seam and a native SHER driver backend. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) section 21 and [`ROADMAP_HONEST.md`](./ROADMAP_HONEST.md).
+- **No open GitHub issues and no `TODO`/`FIXME` markers in `crates/`** as of the last verification pass.
 
-**A pure-Rust, zero-`unsafe`, zero-FFI software GPU simulation** — the bulk of this workspace. It plays the same role `llvmpipe`/`lavapipe` play for Mesa: a hardware-independent correctness baseline the rest of the stack is built and tested against. 59 tests pass with no GPU hardware, no Vulkan, and no Mesa dependency in the loop (`cargo test --workspace --exclude vulkan_backend`).
+## Installation
 
-- Native graphics API: device, resource, pipeline, command-stream, and timeline object model (`graphics_api`)
-- GPU abstraction layer with multi-GPU support and an in-process software reference driver (`gpu_abstraction`)
-- Command-stream validation, GPU fault detection, and isolated per-context fault recovery, so one context's failure doesn't take down others
-- Driver panic containment: `graphics_runtime::submit` catches a panic inside driver code (`catch_unwind`) instead of letting it unwind through the caller, marks the device faulted through the same `GpuFault` channel a hardware fault uses, and the existing `recover_device` path hot-restarts it — a fresh device can be created and used again immediately, without crashing the runtime or the process
-- Every capability-gated operation (device creation, submission, admin/recovery) reuses SHER Kernel's existing capability and tier security model, not a graphics-specific one, and every grant/denial flows into an audit trail
-- Cursor rendering primitives (`set_cursor_image`, `set_cursor_position`, `show_cursor`, `hide_cursor`) that own how the cursor is drawn without touching position tracking, focus, or input, which stay in SHER-Input/SHER-Display
-- `cargo run -p graphics_runtime --example triangle` walks the entire stack end to end: device → shaders → pipeline → resource → validated command stream → submit → wait → present
+Prerequisites:
 
-**A real Vulkan backend** (`vulkan_backend`), new alongside the simulation — genuine `ash` FFI bindings against a real Vulkan loader/ICD, not a wrapper around the software driver:
-
-- Real physical-device enumeration via `vkEnumeratePhysicalDevices`/`vkGetPhysicalDeviceProperties` — verified against MoltenVK on macOS, reporting an actual `Apple M5` GPU, no synthetic data
-- A real offscreen clear-color render: allocates a real `VkImage`, records and submits a real command buffer (`vkCmdClearColorImage` → `vkCmdCopyImageToBuffer`), waits on a real fence, and reads the resulting pixels back from actual GPU/ICD memory — the crate's tests assert the bytes read back match the requested color, so this proves real execution, not just that the calls didn't error
-- Deliberately **not** wired into `gpu_abstraction::GpuDriver`/`graphics_runtime::GraphicsRuntime` yet — bridging a real, asynchronous, device-lost-capable Vulkan device into a trait shaped around the software driver's synchronous semantics is real design work, tracked as follow-up, not claimed as done
-- Builds and `cargo test`s cleanly with **no Vulkan loader installed at all** (this repo's CI installs Mesa's lavapipe so the real-hardware paths execute instead of skipping, but that's not required for the workspace to build): `ash`'s `loaded` feature `dlopen()`s the loader at runtime rather than linking against it, and every entry point reports unavailability via `Result` instead of panicking
-
-Full detail on exactly what's real vs. simulated, and the reasoning behind not integrating them yet, is in [`crates/vulkan_backend/src/lib.rs`](./crates/vulkan_backend/src/lib.rs)'s module docs and `ARCHITECTURE.md`'s Vulkan-backend addendum (end of the document).
-
-The Mesa/OpenGL compatibility seam and a native SHER driver backend (as opposed to a real-Vulkan/MoltenVK backend used directly) remain unbuilt; the roadmap and effort estimate in `ARCHITECTURE.md` section 21 lays out what's realistically implementable next versus what needs more research.
-
-## Architecture at a glance
-
-```
-OpenGL apps ──┐
-Vulkan apps ──┼──→ SHER Graphics Runtime → SHER GPU Abstraction → SHER Kernel → Hardware   (planned)
-Native apps ──┘
-
-Real today, separately: vulkan_backend (ash) → real Vulkan loader/ICD → real GPU
-```
-
-`ARCHITECTURE.md` covers the full layering: the native API/runtime/abstraction split, the Mesa winsys/WSI integration strategy, the security and capability model, and the phased migration path from LKI-hosted Linux GPU drivers to native SHER drivers.
-
-## The SHER family
-
-This repo is one part of the SHER platform. For discoverability (including by anyone or
-anything — human or AI agent — landing on just one of these repos), here are all the others:
-
-- [SHER-KERNEL](https://github.com/Mullassery/SHER-KERNEL) — capability-based object model, scheduler, memory, driver lifecycle
-- [SHER-Process-Explorer](https://github.com/Mullassery/SHER-Process-Explorer) — Linux process telemetry and evidence-based "why" investigation
-- [SHER-INPUT](https://github.com/Mullassery/SHER-INPUT) — canonical input event normalization (keyboard/pointer/touch/tablet/gamepad)
-- [SHER-Display](https://github.com/Mullassery/SHER-Display) — compositor/display server, consumes this repo's graphics API
-- [SHER-Aurora](https://github.com/Mullassery/SHER-Aurora) — GNOME/GTK4-oriented Rust design system
-
-(This list is discoverability only — see [Cross-repo compatibility](#cross-repo-compatibility-verified-whole-family)
-right below for which of these this repo actually depends on at the Cargo level.)
-
-## Cross-repo compatibility (verified, whole family)
-
-This repo is part of a 5-repo family under the Mullassery org, expected to
-be cloned as sibling directories: `SHER-Kernel`, `SHER-Graphics` (this
-repo), `SHER-Display`, `SHER-Input`, and `Aurora` (GitHub: `SHER-Aurora`).
-Actual Cargo-level coupling, confirmed by reading every `Cargo.toml` in the
-family:
-
-- **SHER-Kernel** — foundation. This repo depends on it (`sher_common`,
-  `sher_objectmodel`, `sher_security`, `hal`, `gpu_driver`) via relative
-  path (`../SHER-KERNEL/crates/...` — the sibling directory name must match
-  the real repo's casing exactly; `cargo` path resolution is case-sensitive
-  on Linux even though a mismatch silently works on macOS/APFS), so both
-  repos must be sibling directories.
-- **SHER-Input** — standalone, no dependency on this repo or vice versa.
-- **SHER-Display** — depends on this repo (`graphics_api`,
-  `gpu_abstraction`, `graphics_runtime`, `graphics_compat`) in addition to
-  SHER-Kernel and SHER-Input.
-- **Aurora** — zero Cargo-level coupling to this repo. Standalone GTK/Qt/Web
-  toolkit; shared "SHER" naming is organizational only.
-
-Both edition (2021) and the dependency contract are verified current: a
-from-scratch `cargo build --workspace` in this repo against SHER-Kernel's
-current state compiles clean (`graphics_api`, `vulkan_backend`,
-`gpu_abstraction`, `graphics_runtime`, `graphics_compat` all build); a
-from-scratch `cargo build --workspace` + `cargo test --workspace` in
-SHER-Display against this repo's current state also compiles and passes
-56/56. This repo is the sole owner of `ash` (Vulkan bindings, 0.38) in the
-family — that dependency isn't leaked across the repo boundary via public
-APIs, so there's no divergent-version risk downstream. `graphics_runtime`
-is the crate that actually instantiates `gpu_driver::GPUDriver` from
-SHER-Kernel; SHER-Display deliberately does not (see SHER-Display's
-`outputs` crate), consuming only value types instead — boundary discipline
-holds across the live chain.
-
-## Workspace
-
-```
-crates/
-├── graphics_api/       # Native SHER Graphics API — object model + trait, app-facing
-├── gpu_abstraction/     # GpuDriver trait (extends SHER-Kernel's hal::HardwareDriver)
-├── graphics_runtime/     # SHER Graphics Runtime — implements graphics_api, owns
-│                          # resource tracking, memory, command translation,
-│                          # timeline sync, and the presentation bridge
-├── graphics_compat/       # Mesa winsys/WSI + DRM-ioctl-compatibility seam (thin; models
-│                          # the Phase A seam, not yet backed by a real Mesa build)
-└── vulkan_backend/        # Real ash/Vulkan FFI: device enumeration + offscreen
-                           # clear-color render against a real loader/ICD. Standalone —
-                           # not yet wired into gpu_abstraction::GpuDriver.
-```
-
-## Prerequisites
-
-- Rust 1.75+
-- [`SHER-KERNEL`](https://github.com/Mullassery/SHER-KERNEL) checked out as a **sibling directory named exactly `SHER-KERNEL`** (`../SHER-KERNEL` relative to this repo) — `sher_common`, `sher_objectmodel`, `sher_security`, `hal`, and `gpu_driver` are consumed via relative path dependencies, not published crates yet
-- **Optional**, for `vulkan_backend`'s tests to exercise a real device instead of skipping: a Vulkan loader + ICD. macOS: `brew install molten-vk vulkan-loader vulkan-tools`. Linux: `mesa-vulkan-drivers`/`vulkan-tools` from your distro (what CI uses). Not required to build — see `crates/vulkan_backend/src/lib.rs`.
-
-Full setup and troubleshooting: [`INSTALLATION.md`](./INSTALLATION.md).
-As-built architecture diagrams (Mermaid): [`docs/architecture/README.md`](./docs/architecture/README.md).
-Honest status/tech-debt supplement to `ARCHITECTURE.md`: [`ROADMAP_HONEST.md`](./ROADMAP_HONEST.md).
-
-## Building
+- Rust 1.75+.
+- [`SHER-KERNEL`](https://github.com/Mullassery/SHER-KERNEL) checked out as a **sibling directory named exactly `SHER-KERNEL`** (`../SHER-KERNEL` relative to this repo).
+- *Optional*, for `vulkan_backend`'s tests to exercise a real device instead of skipping: a Vulkan loader + ICD. macOS: `brew install molten-vk vulkan-loader vulkan-tools`. Linux: `mesa-vulkan-drivers`/`vulkan-tools` from your distro (what CI uses). Not required to build.
 
 ```bash
+git clone https://github.com/Mullassery/SHER-KERNEL.git
+git clone https://github.com/Mullassery/SHER-Graphics.git
+cd SHER-Graphics
 ./scripts/install.sh   # checks toolchain + sibling checkout, builds, tests
-# or, if both repos are already cloned as siblings:
+```
+
+Full setup and troubleshooting: [`INSTALLATION.md`](./INSTALLATION.md).
+
+## Quick start
+
+```bash
+# If both repos are already cloned as siblings:
 cargo build
 cargo test
+
+# Walk the whole software stack end to end:
+cargo run -p graphics_runtime --example triangle
 ```
 
 See the [`Makefile`](./Makefile) (`make help`) for the rest of the dev workflow: `fmt`, `clippy`, `doc`, `clean`.
 
-## Linux / Ubuntu compatibility
+## Usage
 
-Verified 2026-10 (see org-wide `SHER-LINUX-RUST-COMPATIBILITY.md`):
+`graphics_runtime` is the runtime crate that instantiates `gpu_driver::GPUDriver` from SHER-Kernel; application-facing integrations target `graphics_api`. As-built architecture diagrams are in [`docs/architecture/README.md`](./docs/architecture/README.md). To run the workspace tests without the Vulkan backend:
 
-- **Ubuntu**: 24.04 LTS and 26.04 LTS, confirmed via real Docker containers.
-- **Architecture**: x86_64 and arm64, both confirmed.
-- **Fixed this pass**: the sibling-path dependency on `SHER-KERNEL` used mixed-case
-  `../SHER-Kernel` in `Cargo.toml`, which resolved fine on case-insensitive macOS/APFS but
-  broke `cargo check` outright on any case-sensitive Linux filesystem — i.e. every real
-  Ubuntu install. Corrected to the real `../SHER-KERNEL` casing; CI's checkout `path:` had
-  the same stale casing and was fixed too.
-- **Vulkan**: extensions are runtime-probed (`enumerate_instance_extension_properties`),
-  never assumed present. On Ubuntu, `mesa-vulkan-drivers`/`vulkan-tools` provide a working
-  ICD for `vulkan_backend`'s hardware-exercising tests; the software reference path needs
-  no GPU at all.
-- The software rasterizer is intentionally scalar (a correctness reference, not a
-  production renderer) — no SIMD yet, tracked as a future enhancement, not a defect.
-  See [Known Issues](#known-issues) for the rest (unwired Vulkan backend, unbuilt Mesa seam).
+```bash
+cargo test --workspace --exclude vulkan_backend
+```
 
-## Known Issues
+## Documentation
 
-- `vulkan_backend` is real but standalone: it is not yet wired into
-  `gpu_abstraction::GpuDriver`/`graphics_runtime::GraphicsRuntime`, so
-  nothing in the runtime/API layers currently routes through it. Bridging
-  its asynchronous, device-lost-capable semantics into the software
-  driver's synchronous trait shape is tracked as follow-up work, not done.
-- `graphics_compat` (the Mesa winsys/WSI compatibility seam) models the
-  planned Phase A seam but is not backed by a real Mesa build yet.
-- This workspace depends on `SHER-Kernel` via relative path (`../SHER-KERNEL`,
-  case-sensitive on Linux), not a published crate, so it cannot be built or
-  published standalone —
-  no crates.io registry drift check applies to a systems component with no
-  independent publish target.
-- No open GitHub issues and no `TODO`/`FIXME` markers in `crates/` as of
-  this pass.
-- **In-process driver panic containment — fixed; process/WASM/eBPF-level
-  sandboxing — still not built.** `GraphicsRuntime::submit` now wraps the
-  driver call in `catch_unwind` (via a new `submit_to_driver` helper); a
-  caught panic is converted into a normal `Err` and recorded through the
-  same `GpuFault` channel a hardware-reported fault already uses
-  (`GpuDriver::mark_faulted`, implemented for `SoftwareGpuDriver` by
-  reusing `inject_fault`), so `device_fault`/`recover_device` handle a
-  caught panic exactly like any other fault — no separate case for
-  callers to think about. Verified with a test driver whose `submit`
-  always panics: the panic doesn't escape `GraphicsRuntime::submit`, the
-  device is reported faulted afterward, and `recover_device` + a fresh
-  `create_device` on the same GPU works immediately after (`graphics_runtime`'s
-  `submit_catches_a_driver_panic_instead_of_crashing` and
-  `a_caught_driver_panic_marks_the_device_faulted_and_is_hot_restartable`).
-  This is still *in-process* containment, not a process boundary: there's
-  no subprocess/WASM/eBPF isolation anywhere in this workspace, and the
-  actual sandbox mechanism (`driver_runtime`'s `DriverContainer`/
-  `SyscallPolicy`) lives in SHER-Kernel and is explicitly "Phase A — ship
-  first," not yet built — this repo only runs the in-process software
-  reference driver today. What changed here is that a driver-code panic
-  no longer takes the whole process down with it; it doesn't add real
-  OS-level process isolation, which would need to be designed jointly
-  with SHER-Kernel's driver lifecycle.
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — full design: philosophy, native API/runtime/abstraction layering, Mesa integration strategy, and the phased migration path
+- [`INSTALLATION.md`](./INSTALLATION.md) — setup and troubleshooting
+- [`ROADMAP_HONEST.md`](./ROADMAP_HONEST.md) — honest status/tech-debt supplement to `ARCHITECTURE.md`
+- [`docs/architecture/README.md`](./docs/architecture/README.md) — as-built Mermaid diagrams
+- [`crates/vulkan_backend/src/lib.rs`](./crates/vulkan_backend/src/lib.rs) — what is real vs. simulated in the Vulkan backend
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md)
+- [`SECURITY.md`](./SECURITY.md) — how to report a vulnerability
+- [`CHANGELOG.md`](./CHANGELOG.md)
 
 ## Contributing
 
-This is early, architecture-defining work, so the most valuable contributions right now are design feedback and issues, not large PRs against a surface that's still moving. Open an issue if you find a boundary violation, a gap between `ARCHITECTURE.md` and the implementation, or a case the capability model doesn't handle correctly. See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the full checklist and scope boundaries, and [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).
+This is early, architecture-defining work, so the most valuable contributions right now are design feedback and issues, not large PRs against a surface that is still moving. Open an issue if you find a boundary violation, a gap between `ARCHITECTURE.md` and the implementation, or a case the capability model does not handle correctly. See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the full checklist and scope boundaries, and [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).
 
-## Security
+## Related projects
 
-See [`SECURITY.md`](./SECURITY.md) to report a vulnerability. Short version: this is pre-production simulation code with no network exposure; don't treat its capability model as a proven security boundary yet.
+- [SHER-KERNEL](https://github.com/Mullassery/SHER-KERNEL) — AI-native operating-system kernel with zero-trust security
+- [SHER-Display](https://github.com/Mullassery/SHER-Display) — display server, compositor, and window manager for the SHER OS family
+- [SHER-Graphics](https://github.com/Mullassery/SHER-Graphics) — native graphics architecture (software GPU + Vulkan backend)
+- [SHER-INPUT](https://github.com/Mullassery/SHER-INPUT) — input subsystem that normalizes device activity into a canonical event stream
+- [SHER-Aurora](https://github.com/Mullassery/aurora) — GNOME design system for Rust
+- [SHER-Process-Explorer](https://github.com/Mullassery/SHER-Process-Explorer) — evidence-based Linux process explorer
+- [Browse all projects](https://github.com/Mullassery?tab=repositories)
 
 ## License
 
-This project is licensed under the [Apache License 2.0](LICENSE).
-
-## Changelog
-
-See [`CHANGELOG.md`](./CHANGELOG.md).
+This project is licensed under the [Apache License 2.0](./LICENSE).

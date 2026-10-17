@@ -8,7 +8,16 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: build + test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       # SHER-KERNEL is consumed via relative path dependencies
       # (../SHER-KERNEL/crates/...), so it must be checked out as a sibling
@@ -57,9 +66,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             SHER-Graphics/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('SHER-Graphics/Cargo.lock') }}
+          key: ${{ matrix.arch }}-cargo-${{ hashFiles('SHER-Graphics/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ matrix.arch }}-cargo-
 
       # Deliberately not `cargo fmt --all`: rustfmt's --all also formats
       # path dependencies, which would reach into SHER-Kernel.

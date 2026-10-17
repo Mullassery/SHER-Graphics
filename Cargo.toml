@@ -8,6 +8,13 @@ members = [
 ]
 resolver = "2"
 
+# `graphics_runtime::submit_to_driver` contains driver panics with
+# `catch_unwind`, which is a no-op under `panic = "abort"`. Pin unwinding
+# explicitly so a downstream profile override can't silently disable that
+# containment (in-process only; see the doc comment on `submit_to_driver`).
+[profile.release]
+panic = "unwind"
+
 [workspace.package]
 version = "0.3.0"
 edition = "2021"

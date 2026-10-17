@@ -402,6 +402,15 @@ impl<D: GpuDriver> GraphicsRuntime<D> {
     /// Still not process/WASM/eBPF-level isolation — see README.md's Known
     /// Issues for what that would require and why it lives in SHER-Kernel's
     /// `driver_runtime`, not here.
+    ///
+    /// **Containment requires `panic = "unwind"`.** `catch_unwind` only
+    /// works when unwinding panics are enabled; under `panic = "abort"`
+    /// this becomes a no-op and a driver panic aborts the process before
+    /// `Err` can be returned. The workspace `Cargo.toml` therefore sets
+    /// `[profile.release] panic = "unwind"` explicitly so a downstream
+    /// profile override can't silently disable containment. Note this is
+    /// in-process containment only: it catches Rust `panic!`s, not
+    /// `abort()`/segfaults from native driver code.
     fn submit_to_driver(
         &mut self,
         gpu: &ObjectId,

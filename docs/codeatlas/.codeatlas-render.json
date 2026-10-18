@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "outputs": {
+    "md": [
+      "crates.1.md",
+      "docs.2.md",
+      "gpu_abstraction.1.1.md",
+      "graphics_api.1.2.md",
+      "graphics_compat.1.3.md",
+      "graphics_runtime.1.4.md",
+      "overview.md",
+      "tools.4.md",
+      "vulkan_backend.1.5.md"
+    ],
+    "html": [
+      "crates.1.html",
+      "docs.2.html",
+      "gpu_abstraction.1.1.html",
+      "graphics_api.1.2.html",
+      "graphics_compat.1.3.html",
+      "graphics_runtime.1.4.html",
+      "overview.html",
+      "tools.4.html",
+      "vulkan_backend.1.5.html"
+    ]
+  }
+}

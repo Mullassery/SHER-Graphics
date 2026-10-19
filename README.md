@@ -92,6 +92,16 @@ cargo test --workspace --exclude vulkan_backend
 - [`SECURITY.md`](./SECURITY.md) — how to report a vulnerability
 - [`CHANGELOG.md`](./CHANGELOG.md)
 
+## Known issues and deferred work
+
+**Blocked / failed:**
+- Wire Vulkan into runtime; Mesa/OpenGL seam.
+
+**Rejected / deferred:**
+- Production renderer.
+
+Full shipped/blocked/rejected detail: [`QUEUE_STATUS.md`](QUEUE_STATUS.md).
+
 ## Queue status
 
 Shipped, blocked/failed, and rejected work for this repository is documented in

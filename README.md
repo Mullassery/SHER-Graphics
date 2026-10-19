@@ -92,6 +92,11 @@ cargo test --workspace --exclude vulkan_backend
 - [`SECURITY.md`](./SECURITY.md) — how to report a vulnerability
 - [`CHANGELOG.md`](./CHANGELOG.md)
 
+## Queue status
+
+Shipped, blocked/failed, and rejected work for this repository is documented in
+[`QUEUE_STATUS.md`](QUEUE_STATUS.md).
+
 ## Contributing
 
 This is early, architecture-defining work, so the most valuable contributions right now are design feedback and issues, not large PRs against a surface that is still moving. Open an issue if you find a boundary violation, a gap between `ARCHITECTURE.md` and the implementation, or a case the capability model does not handle correctly. See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the full checklist and scope boundaries, and [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).

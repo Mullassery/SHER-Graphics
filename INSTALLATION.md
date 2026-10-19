@@ -1,12 +1,13 @@
 # SHER Graphics - Installation & Development Setup
 
-**Status**: Design phase for the native runtime (`graphics_api`/`gpu_abstraction`/
-`graphics_runtime`/`graphics_compat`) — those crate skeletons compile and
-pass tests against a software reference driver, no real GPU driver wired in
-yet. Separately, `vulkan_backend` is a real, working Vulkan (`ash`) binding
-against an actual loader/ICD (device enumeration + an offscreen
-clear-color render) — see `README.md` and that crate's module docs for
-exactly what's real there. This guide covers setting up the workspace for
+**Status**: The native runtime (`graphics_api`/`gpu_abstraction`/
+`graphics_runtime`/`graphics_compat`) compiles and passes tests against a
+software reference driver by default. A real Vulkan (`ash`) binding lives in
+`vulkan_backend` (device enumeration + offscreen clear-color render) and is
+wired into `gpu_abstraction::VulkanDriver`/`graphics_runtime` behind the
+non-default `vulkan` feature; per-op draw/dispatch translation is not done
+yet. See `README.md`, `CHANGELOG.md`, and that crate's module docs for
+exactly what's real. This guide covers setting up the workspace for
 development, not deploying a running graphics stack (there isn't one to
 deploy yet — see [`ARCHITECTURE.md`](./ARCHITECTURE.md) section 21 for
 what's implementable first).
@@ -74,9 +75,11 @@ cargo test
 ```
 
 Four of the five crates (`graphics_api`, `gpu_abstraction`, `graphics_runtime`,
-`graphics_compat`) run entirely in software — `gpu_abstraction::SoftwareGpuDriver`
-is a hardware-independent reference driver, so no GPU or root access is
-required to build or test.
+`graphics_compat`) run entirely in software by default —
+`gpu_abstraction::SoftwareGpuDriver` is a hardware-independent reference
+driver, so no GPU or root access is required to build or test. The optional
+non-default `vulkan` feature additionally wires the real backend into
+`gpu_abstraction::VulkanDriver`/`graphics_runtime`.
 
 The fifth, `vulkan_backend`, is a real Vulkan (`ash`) binding, but only
 `dlopen()`s the actual Vulkan loader at **runtime**, not build/link time —
@@ -115,18 +118,24 @@ cargo doc --open
 
 Expected: 59 tests passing in the software-driver crates
 (`graphics_api`/`gpu_abstraction`/`graphics_runtime`/`graphics_compat`,
-`cargo test --workspace --exclude vulkan_backend`) plus 4 more in
-`vulkan_backend` (63 total), zero warnings from this workspace's own crates
+`cargo test --workspace --exclude vulkan_backend`) plus 5 more in
+`vulkan_backend` (64 total), zero warnings from this workspace's own crates
 (pre-existing warnings from `sher_objectmodel` in SHER-Kernel are unrelated
 and safe to ignore). If no Vulkan loader is installed, `vulkan_backend`'s
 GPU-dependent tests still count as passing — they detect that up front and
 skip, per its module docs; with a loader present (verified on this repo's
-CI and against a real MoltenVK device during this pass) all 4 run for
+CI and against a real MoltenVK device during this pass) all 5 run for
 real instead of skipping.
+
+With the wired adapter enabled, `cargo test --workspace --features vulkan`
+runs 74 tests: the same 64 plus 10 feature-gated `VulkanDriver` adapter tests
+(command queue, device-lost mapping, fallback, VRAM accounting). Without a
+loader/ICD the real-device runtime test skips and `FallbackDriver` selects the
+software driver with a recorded reason.
 
 ---
 
-## Optional: real Vulkan (for `vulkan_backend`)
+## Optional: real Vulkan (for `vulkan_backend` and the `vulkan` feature)
 
 Not required to build or pass tests — `vulkan_backend`'s tests skip
 gracefully without a Vulkan loader/ICD present (see above). Installing one
@@ -141,6 +150,7 @@ export VK_ICD_FILENAMES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json
 export DYLD_LIBRARY_PATH=/opt/homebrew/lib:$DYLD_LIBRARY_PATH
 vulkaninfo --summary   # confirm a real device is listed
 cargo test -p vulkan_backend -- --nocapture
+cargo test --workspace --features vulkan -- --nocapture
 ```
 
 Homebrew's `/opt/homebrew/lib` isn't on macOS's default `dyld` search path,
@@ -154,6 +164,7 @@ from your distro's package manager — this is what this repo's CI installs:
 ```bash
 sudo apt-get install -y mesa-vulkan-drivers vulkan-tools libvulkan1
 cargo test -p vulkan_backend -- --nocapture
+cargo test --workspace --features vulkan -- --nocapture
 ```
 
 ---

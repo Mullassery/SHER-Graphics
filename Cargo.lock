@@ -93,6 +93,8 @@ dependencies = [
  "graphics_api",
  "hal",
  "sher_common",
+ "tokio",
+ "vulkan_backend",
 ]
 
 [[package]]

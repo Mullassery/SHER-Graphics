@@ -55,15 +55,15 @@ graph TD
 
     vulkan_backend -.->|"no dependency on any\nother crate in this repo"| vulkan_backend
 
-    style vulkan_backend stroke-dasharray: 5 5
     style graphics_compat stroke-dasharray: 5 5
 ```
 
-Dashed borders mark crates that are real but **not wired into the rest of
-the stack**: `vulkan_backend` has zero Cargo dependency on any other crate
-in this repo (by design — see its module docs), and `graphics_compat`'s
-`DrmCompatShim` wraps `graphics_runtime` but nothing outside its own test
-suite calls it yet.
+Dashed borders mark crates that are real but not on the default path.
+`vulkan_backend` still has zero Cargo dependency on any other crate in this
+repo (by design — see its module docs); it is consumed *the other way* by
+`gpu_abstraction`'s non-default `vulkan` feature through the `VulkanDriver`
+adapter. `graphics_compat`'s `DrmCompatShim` wraps `graphics_runtime` but
+nothing outside its own test suite calls it yet.
 
 ## Runtime layering and the SHER-Kernel boundary
 

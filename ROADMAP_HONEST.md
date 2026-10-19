@@ -8,6 +8,16 @@ what actually works, what's tested, and what's simply not built — as of
 **2026-09-20**, verified by running the commands below myself in this
 pass, not by re-reading old commit messages.
 
+**Vulkan wiring follow-up, 2026-10-20**: `vulkan_backend` is now reachable
+through `gpu_abstraction::VulkanDriver`/`graphics_runtime` behind the
+non-default `vulkan` feature (dedicated render thread + Tokio command/result
+queue; device loss maps to `GpuFault`; explicit software fallback). Default
+tests are 64/64; `--features vulkan` is 74/74. The 2026-09-20/22 snapshot
+below is retained as history, but its "disconnected" claims are superseded.
+Per-op draw/dispatch translation and real-hardware draw validation remain
+open; the real clear/fence path was exercised via MoltenVK on this machine.
+See `CHANGELOG.md`.
+
 **Quick-fix follow-up pass, 2026-09-22**: re-ran the full validation suite
 (fmt/build/test/clippy/triangle example — all still green, 63/63 tests),
 ran `cargo audit` for real (network was available this time — see the
@@ -65,13 +75,14 @@ Functionally, this means the following are real and tested, not aspirational:
   side of the boundary rule: SHER-Graphics is allowed to instantiate the
   kernel's own driver type; it must not (and does not) redefine one.
 
-## Bucket 2 — Built, but not integrated / not what it sounds like
+## Bucket 2 — Built, but not fully integrated / not what it sounds like
 
-- **`vulkan_backend` is real but disconnected.** It does not implement
-  `gpu_abstraction::GpuDriver` and is not reachable through
-  `graphics_runtime::GraphicsRuntime`. Nothing in the tested end-to-end
-  path (the triangle example) touches real Vulkan. This is disclosed
-  already in the README's "Known Issues"; confirmed still true.
+- **`vulkan_backend` wiring (superseded 2026-10-20).** At the time of the
+  2026-09-20 snapshot it did not implement `gpu_abstraction::GpuDriver` and
+  was not reachable through `graphics_runtime::GraphicsRuntime`. It is now
+  wired behind the non-default `vulkan` feature through `VulkanDriver`; the
+  default `triangle` example still uses the software driver. Per-op
+  draw/dispatch translation remains open.
 - **`graphics_compat`'s `DrmCompatShim` is a reference shim, not a real
   DRM-ioctl implementation.** It's honestly documented as such in its
   module docs (`crates/graphics_compat/src/lib.rs:1-23`), and, as of this
@@ -113,10 +124,11 @@ Functionally, this means the following are real and tested, not aspirational:
   The actual sandbox mechanism this would depend on
   (`driver_runtime::DriverContainer`/`SyscallPolicy`) lives in
   `SHER-Kernel` and is itself not yet built there either.
-- **Any real hardware GPU I/O**: this entire workspace, `vulkan_backend`
+- **Any real hardware GPU I/O**: this entire workspace, the `vulkan` feature
   aside, runs in-memory/software-only. No DRM/KMS ioctls, no real VRAM
   allocation, no real command-buffer submission to real hardware outside
-  `vulkan_backend`'s narrow, disconnected offscreen-render path.
+  the adapter's narrow offscreen-clear path (which is real and
+  fence-synchronized, but does not yet translate draws/dispatches).
 - **Published crates**: none of these crates are published to crates.io.
   This repo cannot build standalone; it requires `SHER-Kernel` checked out
   as a sibling directory via relative path dependencies.
@@ -207,10 +219,10 @@ do about it.
 - `PrimeHandleToFd` returning an `ObjectId` instead of a real fd — by
   design, already documented in the module and enum docs; skipped per
   this pass's explicit scope.
-- Wiring `vulkan_backend` into `gpu_abstraction::GpuDriver` — already
-  correctly identified in the existing README/`ARCHITECTURE.md` as
-  "real, separate design work," and this pass agrees with that framing;
-  not attempted here.
+- Wiring `vulkan_backend` into `gpu_abstraction::GpuDriver` — done in the
+  2026-10-20 follow-up behind the non-default `vulkan` feature. Remaining:
+  per-op draw/dispatch translation, memory-type-aware allocation, and real
+  draw validation.
 - Verifying the new `cargo-audit` CI job specifically goes green *in
   GitHub Actions* — this pass ran `cargo audit` for real, locally (see
   item 1: 65 dependencies scanned, zero vulnerabilities), which is a

@@ -11,7 +11,7 @@ inspected repository/docs, not proof that it cannot exist.
 
 ## What it is
 
-Graphics stack for SHER Kernel: software GPU reference driver, capability-secured runtime, and a real but unwired Vulkan backend.
+Graphics stack for SHER Kernel: software GPU reference driver, capability-secured runtime, and a real Vulkan backend wired behind a non-default feature via `gpu_abstraction::VulkanDriver`.
 
 ## Verified strengths
 
@@ -20,7 +20,7 @@ Graphics stack for SHER Kernel: software GPU reference driver, capability-secure
 
 ## Verified gaps and user-facing risks
 
-- Vulkan backend is not wired into the runtime/API; no Mesa/OpenGL; path dependency on SHER-KERNEL; no crates.io.
+- Vulkan backend is wired behind the non-default `vulkan` feature (submission currently proves the real clear/fence path; per-op draw/dispatch translation is still missing); no Mesa/OpenGL; path dependency on SHER-KERNEL; no crates.io.
 - Not a production renderer; scalar software rasterizer.
 
 ## Direct competitors

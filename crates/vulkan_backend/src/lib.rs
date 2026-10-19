@@ -14,15 +14,15 @@
 //!
 //! This crate is the other half of an honest answer: a real binding to a
 //! real Vulkan loader/ICD, using [`ash`](https://docs.rs/ash), the
-//! standard idiomatic Rust Vulkan binding. It is intentionally **thin** —
-//! it does not attempt to implement `gpu_abstraction::GpuDriver` or wire
-//! into `graphics_runtime::GraphicsRuntime`. Bridging a real, asynchronous,
-//! device-lost-capable Vulkan device into a trait shaped around the
-//! software driver's synchronous, always-succeeds-unless-told-otherwise
-//! semantics is real design work (device-lost recovery, real fence-based
-//! timelines, real memory-type-aware allocation instead of a bump
-//! allocator) that belongs to a follow-up pass, not this one. What's here
-//! is real and independently verifiable:
+//! standard idiomatic Rust Vulkan binding. It stays intentionally **thin**:
+//! the crate itself has no dependency on `gpu_abstraction` or
+//! `graphics_runtime`. The `gpu_abstraction` crate's non-default `vulkan`
+//! feature supplies a `VulkanDriver` adapter that owns a dedicated render
+//! thread and maps this crate's synchronous calls (and
+//! [`VulkanError::DeviceLost`]) onto the synchronous `GpuDriver` trait, so
+//! the runtime does not become async. Per-op draw/dispatch translation and
+//! memory-type-aware allocation remain follow-up work; what's here is real
+//! and independently verifiable:
 //!
 //! 1. [`VulkanContext::probe`] — creates a real `VkInstance`, enumerates
 //!    real `VkPhysicalDevice`s via `vkEnumeratePhysicalDevices`, and
@@ -67,8 +67,9 @@ use std::fmt;
 
 /// Everything that can go wrong talking to a real Vulkan implementation.
 /// Deliberately distinct from `sher_common::Error`: this crate has no
-/// dependency on the rest of the SHER stack, by design (see module docs —
-/// it's a standalone real-Vulkan proof, not wired into the runtime yet).
+/// dependency on the rest of the SHER stack, by design (see module docs).
+/// `gpu_abstraction`'s non-default `vulkan` feature consumes it through the
+/// `VulkanDriver` adapter; this crate itself remains standalone.
 #[derive(Debug)]
 pub enum VulkanError {
     /// No Vulkan loader/ICD found on this system (e.g. `libvulkan`/
@@ -79,6 +80,10 @@ pub enum VulkanError {
     /// A `vkCreateInstance`/`vkEnumeratePhysicalDevices`/etc. call itself
     /// returned a Vulkan error code.
     Vulkan(vk::Result),
+    /// The GPU was lost (`VK_ERROR_DEVICE_LOST`). Kept distinct from the
+    /// generic `Vulkan` arm so adapters can map it to a *recoverable*
+    /// device fault instead of a fatal error.
+    DeviceLost(String),
     /// No physical device satisfied a requirement (e.g. no queue family
     /// supporting graphics+transfer).
     NoSuitableDevice(String),
@@ -97,6 +102,7 @@ impl fmt::Display for VulkanError {
                 write!(f, "Vulkan loader/ICD unavailable: {msg}")
             }
             VulkanError::Vulkan(result) => write!(f, "Vulkan call failed: {result}"),
+            VulkanError::DeviceLost(msg) => write!(f, "Vulkan device lost: {msg}"),
             VulkanError::NoSuitableDevice(msg) => write!(f, "no suitable Vulkan device: {msg}"),
             VulkanError::InvalidDimensions { width, height } => write!(
                 f,
@@ -110,7 +116,11 @@ impl std::error::Error for VulkanError {}
 
 impl From<vk::Result> for VulkanError {
     fn from(result: vk::Result) -> Self {
-        VulkanError::Vulkan(result)
+        if result == vk::Result::ERROR_DEVICE_LOST {
+            VulkanError::DeviceLost(result.to_string())
+        } else {
+            VulkanError::Vulkan(result)
+        }
     }
 }
 
@@ -765,6 +775,18 @@ mod tests {
     fn probe_reports_availability_without_panicking() {
         // This must never panic, on any machine, Vulkan present or not.
         let _ = VulkanContext::available();
+    }
+
+    #[test]
+    fn device_lost_maps_to_its_own_error_variant() {
+        assert!(matches!(
+            VulkanError::from(vk::Result::ERROR_DEVICE_LOST),
+            VulkanError::DeviceLost(_)
+        ));
+        assert!(matches!(
+            VulkanError::from(vk::Result::ERROR_OUT_OF_HOST_MEMORY),
+            VulkanError::Vulkan(vk::Result::ERROR_OUT_OF_HOST_MEMORY)
+        ));
     }
 
     #[test]

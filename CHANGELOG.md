@@ -22,6 +22,27 @@ commit-level history.
   layering and the `SHER-Kernel` dependency, alongside (not replacing)
   the existing design-level `ARCHITECTURE.md`.
 - `cargo-audit` CI job (advisory-database dependency scan).
+- Non-default `vulkan` feature wiring `vulkan_backend` into
+  `gpu_abstraction::GpuDriver`/`graphics_runtime::GraphicsRuntime` through
+  `VulkanDriver`: a dedicated render thread plus a Tokio command/result
+  queue keeps the public trait/runtime synchronous; the adapter records
+  `VK_ERROR_DEVICE_LOST` as a recoverable `GpuFault` and recreates the
+  context on `reset_device`. Includes mock-backed command-queue/device-lost
+  tests, an explicit `FallbackDriver` software path, and runtime
+  constructors `with_vulkan`/`with_vulkan_or_software`.
+- `vulkan_backend::VulkanError::DeviceLost` so device loss is distinguishable
+  from other Vulkan failures at the FFI boundary.
+- 10 additional feature-gated adapter tests plus a `VulkanError::DeviceLost`
+  mapping test (74 total with `--features vulkan`, 64 default), including a
+  runtime test that runs against a real loader/ICD when one is present and
+  skips otherwise.
+
+### Changed
+- README/docs no longer claim `vulkan_backend` is unwired: it is wired behind
+  the non-default feature. Known-issue text now states precisely what remains
+  (per-op draw/dispatch translation, memory-type-aware allocation, and
+  real-hardware validation of those draws; submission currently proves the
+  real Vulkan clear/fence path).
 
 ### Fixed
 - `Cargo.lock` was listed in `.gitignore` despite this workspace shipping

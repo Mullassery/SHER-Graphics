@@ -11,6 +11,14 @@ use hal::{DeviceInfo, DeviceType, HardwareDriver};
 use sher_common::{Error, ObjectId, Result};
 use std::collections::HashMap;
 
+#[cfg(feature = "vulkan")]
+mod vulkan;
+#[cfg(feature = "vulkan")]
+pub use vulkan::{
+    BackendAdapterInfo, BackendError, FallbackDriver, RealVulkanBackend, VulkanBackend,
+    VulkanDriver,
+};
+
 #[derive(Debug, Clone)]
 pub struct GpuAllocation {
     pub id: ObjectId,

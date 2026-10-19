@@ -7,7 +7,15 @@ license.workspace = true
 repository.workspace = true
 description = "SHER GPU Abstraction Layer - GpuDriver trait extending hal::HardwareDriver with VRAM, DMA, submission, and fault primitives"
 
+[features]
+default = []
+# Non-default: pulls in the real Vulkan backend and a dedicated render thread.
+# Nothing in the software path changes when this is off.
+vulkan = ["dep:vulkan_backend", "dep:tokio"]
+
 [dependencies]
 sher_common = { workspace = true }
 graphics_api = { path = "../graphics_api" }
 hal = { workspace = true }
+vulkan_backend = { path = "../vulkan_backend", optional = true }
+tokio = { version = "1", default-features = false, features = ["rt", "sync"], optional = true }

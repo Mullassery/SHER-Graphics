@@ -7,6 +7,12 @@ license.workspace = true
 repository.workspace = true
 description = "SHER Graphics Runtime - implements graphics_api::GraphicsApi, orchestrating resource tracking, memory, command submission, and presentation on top of a GpuDriver"
 
+[features]
+default = []
+# Wires gpu_abstraction::VulkanDriver (and its real vulkan_backend worker) into
+# the runtime without making the runtime itself async. Non-default.
+vulkan = ["gpu_abstraction/vulkan"]
+
 [dependencies]
 sher_common = { workspace = true }
 sher_objectmodel = { workspace = true }

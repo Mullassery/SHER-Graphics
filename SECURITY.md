@@ -15,8 +15,9 @@ The one crate with real external surface is `vulkan_backend`, which uses
 `unsafe` FFI (via `ash`) to call a real Vulkan loader/ICD. Its `unsafe`
 usage is scoped to FFI call sites required by the Vulkan C API; see
 [`crates/vulkan_backend/src/lib.rs`](./crates/vulkan_backend/src/lib.rs)
-for what it does and does not do (it is not wired into the rest of the
-workspace — see the README's "Known Issues").
+for what it does and does not do (it is reachable only behind the
+non-default `vulkan` feature through `gpu_abstraction::VulkanDriver` — see
+the README's "Known Issues" for the remaining draw/dispatch gaps).
 
 ## Supported versions
 

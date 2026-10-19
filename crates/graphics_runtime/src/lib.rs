@@ -23,6 +23,9 @@ use sher_objectmodel::CapabilitySet;
 use sher_security::audit::AuditLog;
 use std::collections::HashMap;
 
+#[cfg(feature = "vulkan")]
+pub use gpu_abstraction::{FallbackDriver, VulkanDriver};
+
 fn bytes_per_pixel(format: PixelFormat) -> usize {
     match format {
         PixelFormat::Rgba8Unorm | PixelFormat::Bgra8Unorm => 4,
@@ -445,6 +448,28 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
         s.clone()
     } else {
         "driver panicked with a non-string payload".to_string()
+    }
+}
+
+#[cfg(feature = "vulkan")]
+impl GraphicsRuntime<VulkanDriver> {
+    /// Builds a runtime over the real Vulkan adapter. Returns a clear error
+    /// (including "Vulkan unavailable: ...") when no loader/ICD is present;
+    /// use [`with_vulkan_or_software`](Self::with_vulkan_or_software) for an
+    /// explicit software fallback.
+    pub fn with_vulkan(presentation_vram_bytes: usize, vulkan_vram_bytes: usize) -> Result<Self> {
+        let driver = VulkanDriver::new(vulkan_vram_bytes)?;
+        Ok(Self::new(driver, presentation_vram_bytes))
+    }
+}
+
+#[cfg(feature = "vulkan")]
+impl GraphicsRuntime<FallbackDriver> {
+    /// Tries Vulkan and records whether the software driver was selected in
+    /// `FallbackDriver::is_vulkan`/`fallback_reason`; the runtime generic and
+    /// all `GraphicsApi` behavior are identical either way.
+    pub fn with_vulkan_or_software(presentation_vram_bytes: usize, vram_bytes: usize) -> Self {
+        Self::new(FallbackDriver::open(vram_bytes), presentation_vram_bytes)
     }
 }
 
@@ -1366,5 +1391,50 @@ mod tests {
             .unwrap();
         assert!(runtime.free_resource(&resource.id).is_ok());
         assert!(runtime.free_resource(&resource.id).is_err());
+    }
+
+    #[cfg(feature = "vulkan")]
+    #[test]
+    fn vulkan_driver_is_wired_through_the_same_runtime_path_when_available() {
+        // Skips on machines without a Vulkan loader/ICD (including this
+        // workspace's CI), exactly like vulkan_backend's own tests. On a host
+        // with Vulkan this exercises the real adapter + render thread through
+        // the unchanged synchronous GraphicsApi surface.
+        let driver = match VulkanDriver::new(64 * 1024 * 1024) {
+            Ok(driver) => driver,
+            Err(error) => {
+                eprintln!("skipping: Vulkan driver unavailable ({error})");
+                return;
+            }
+        };
+        let gpu = driver.device_id();
+        let mut runtime = GraphicsRuntime::new(driver, 1024 * 1024);
+        let device = runtime.create_device(gpu, &full_caps()).unwrap();
+        let timeline = runtime.create_timeline(&device.id).unwrap();
+        let queue = device.queue(WorkloadClass::Transfer).unwrap();
+        let stream = runtime
+            .create_command_stream(&device.id, WorkloadClass::Transfer)
+            .unwrap();
+
+        runtime.submit(&queue, stream, &timeline.id, 1).unwrap();
+        assert_eq!(runtime.timeline_value(&timeline.id).unwrap(), 1);
+        assert!(runtime.device_fault(&device.id).unwrap().is_none());
+    }
+
+    #[cfg(feature = "vulkan")]
+    #[test]
+    fn explicit_software_fallback_keeps_the_runtime_usable() {
+        let mut runtime = GraphicsRuntime::<FallbackDriver>::with_vulkan_or_software(
+            1024 * 1024,
+            64 * 1024 * 1024,
+        );
+        // Whether the host has Vulkan or not, the runtime is constructed and
+        // the driver reports which path it chose.
+        let driver = runtime.driver_mut(&admin_caps()).unwrap();
+        if driver.is_vulkan() {
+            assert!(driver.fallback_reason().is_none());
+        } else {
+            assert!(driver.fallback_reason().is_some());
+        }
     }
 }

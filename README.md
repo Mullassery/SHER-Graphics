@@ -9,7 +9,7 @@ Native graphics architecture for [SHER Kernel](https://github.com/Mullassery/SHE
 
 SHER Graphics is a pure-Rust graphics stack designed around SHER Kernel's capability/security model rather than as a Vulkan wrapper with native bits bolted on. It is a five-crate workspace consisting of a hardware-independent software GPU simulation (the bulk of the code) and a genuine Vulkan/`ash` backend developed alongside it, not as a shim over the software driver.
 
-Most of the workspace plays the role `llvmpipe`/`lavapipe` play for Mesa: a correctness baseline the rest of the stack is built and tested against. About 59 tests pass with zero GPU hardware, zero Vulkan, and zero Mesa dependency in the loop (`cargo test --workspace --exclude vulkan_backend`).
+Most of the workspace plays the role `llvmpipe`/`lavapipe` play for Mesa: a correctness baseline the rest of the stack is built and tested against. 64 default workspace tests pass (59 excluding `vulkan_backend`) with zero GPU hardware, zero Vulkan, and zero Mesa dependency in the loop; `--features vulkan` adds 10 adapter tests (74 total), including mock-backed command-queue and device-lost coverage.
 
 ## Features / Highlights
 
@@ -20,6 +20,7 @@ Most of the workspace plays the role `llvmpipe`/`lavapipe` play for Mesa: a corr
 - **Capability-gated operations** — device creation, submission, and admin/recovery reuse SHER Kernel's existing capability and tier model, and every grant/denial flows into an audit trail.
 - **Cursor rendering primitives** — `set_cursor_image`, `set_cursor_position`, `show_cursor`, `hide_cursor` own how the cursor is drawn without owning position tracking, focus, or input (those stay in SHER-INPUT/SHER-Display).
 - **A real Vulkan backend** (`vulkan_backend`) — genuine `ash` FFI bindings against a real Vulkan loader/ICD: real physical-device enumeration via `vkEnumeratePhysicalDevices` and a real offscreen clear-color render (allocate `VkImage`, record/submit a command buffer, wait on a fence, read pixels back and assert their bytes).
+- **Vulkan wired into the runtime** (non-default `vulkan` feature) — `gpu_abstraction::VulkanDriver` owns a dedicated render thread plus a Tokio command/result queue, so `GpuDriver`/`GraphicsRuntime` stay synchronous. `VK_ERROR_DEVICE_LOST` becomes a normal recoverable `GpuFault`; no Vulkan loader means an explicit `Vulkan unavailable` error or `FallbackDriver` software fallback, never a silent pretend-success.
 - **End-to-end example** — `cargo run -p graphics_runtime --example triangle` walks device → shaders → pipeline → resource → validated command stream → submit → wait → present.
 
 ## Who it's for / Use cases
@@ -30,7 +31,7 @@ Most of the workspace plays the role `llvmpipe`/`lavapipe` play for Mesa: a corr
 
 ## What it is not
 
-- **Not yet a production renderer.** The real Vulkan backend exists but is not wired into `gpu_abstraction::GpuDriver`/`graphics_runtime::GraphicsRuntime`; nothing in the runtime/API layers currently routes through it. Bridging its asynchronous, device-lost-capable semantics into the software driver's synchronous trait shape is tracked follow-up work, not done.
+- **Not yet a Vulkan graphics renderer.** The real backend is wired in as `gpu_abstraction::VulkanDriver` (feature `vulkan`), but individual `DriverOp`s are not yet translated into draws/dispatches. Each submit currently executes the backend's verified offscreen clear as a real, fence-synchronized Vulkan submission; per-op translation and memory-type-aware allocation remain follow-up work. The default build is still the software reference driver.
 - **Not a Mesa/OpenGL integration yet.** `graphics_compat` (the Mesa winsys/WSI compatibility seam) models the planned Phase A seam but is not backed by a real Mesa build.
 - **Not a standalone build.** It depends on `SHER-KERNEL` via a relative path (`../SHER-KERNEL`, case-sensitive on Linux), so that repo must be a sibling directory; there is no crates.io publish target.
 - **Not OS-level sandboxing.** Panic containment is in-process only — there is no subprocess/WASM/eBPF isolation in this workspace; the real sandbox mechanism lives in SHER-Kernel's `driver_runtime` and is not yet built.
@@ -38,8 +39,8 @@ Most of the workspace plays the role `llvmpipe`/`lavapipe` play for Mesa: a corr
 
 ## Project status
 
-- **Implemented and tested:** `graphics_api`, `gpu_abstraction`, `graphics_runtime` (including panic containment and fault recovery), `graphics_compat` (thin compatibility seam), and the standalone `vulkan_backend` (device enumeration + offscreen clear-color render).
-- **Real but not yet integrated:** `vulkan_backend` is deliberately not wired into the runtime/API layers.
+- **Implemented and tested:** `graphics_api`, `gpu_abstraction`, `graphics_runtime` (including panic containment and fault recovery), `graphics_compat` (thin compatibility seam), and `vulkan_backend` (device enumeration + offscreen clear-color render).
+- **Wired behind a non-default feature:** `vulkan_backend` is reachable through `gpu_abstraction::VulkanDriver`/`graphics_runtime` when `--features vulkan` is enabled, including device-lost mapping and explicit software fallback. The adapter's command queue and device-lost path are tested with a mock backend; the real clear/fence path is exercised on hosts with a loader/ICD.
 - **Not built:** the Mesa/OpenGL compatibility seam and a native SHER driver backend. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) section 21 and [`ROADMAP_HONEST.md`](./ROADMAP_HONEST.md).
 - **No open GitHub issues and no `TODO`/`FIXME` markers in `crates/`** as of the last verification pass.
 
@@ -49,7 +50,7 @@ Prerequisites:
 
 - Rust 1.75+.
 - [`SHER-KERNEL`](https://github.com/Mullassery/SHER-KERNEL) checked out as a **sibling directory named exactly `SHER-KERNEL`** (`../SHER-KERNEL` relative to this repo).
-- *Optional*, for `vulkan_backend`'s tests to exercise a real device instead of skipping: a Vulkan loader + ICD. macOS: `brew install molten-vk vulkan-loader vulkan-tools`. Linux: `mesa-vulkan-drivers`/`vulkan-tools` from your distro (what CI uses). Not required to build.
+- *Optional*, for `vulkan_backend`'s tests and the `vulkan` feature to exercise a real device instead of skipping/falling back: a Vulkan loader + ICD. macOS: `brew install molten-vk vulkan-loader vulkan-tools`. Linux: `mesa-vulkan-drivers`/`vulkan-tools` from your distro (what CI uses). Not required to build.
 
 ```bash
 git clone https://github.com/Mullassery/SHER-KERNEL.git
@@ -67,6 +68,11 @@ Full setup and troubleshooting: [`INSTALLATION.md`](./INSTALLATION.md).
 cargo build
 cargo test
 
+# Opt into the real Vulkan adapter. Building/testing still works without a
+# loader; driver construction then returns "Vulkan unavailable" or uses the
+# explicit FallbackDriver software path.
+cargo test --workspace --features vulkan
+
 # Walk the whole software stack end to end:
 cargo run -p graphics_runtime --example triangle
 ```
@@ -79,6 +85,17 @@ See the [`Makefile`](./Makefile) (`make help`) for the rest of the dev workflow:
 
 ```bash
 cargo test --workspace --exclude vulkan_backend
+```
+
+With the non-default feature enabled, the runtime is constructed exactly as before because the adapter keeps the synchronous trait shape:
+
+```rust
+// Explicit: Err("Vulkan unavailable: ...") when no loader/ICD is present.
+let runtime = GraphicsRuntime::<VulkanDriver>::with_vulkan(16 * 1024 * 1024, 256 * 1024 * 1024)?;
+
+// Or: try Vulkan, record the reason, and use the software driver if absent.
+let runtime = GraphicsRuntime::<FallbackDriver>::with_vulkan_or_software(16 * 1024 * 1024, 256 * 1024 * 1024);
+// runtime.driver_mut(&admin_caps)?.is_vulkan() / .fallback_reason()
 ```
 
 ## Documentation
@@ -95,7 +112,8 @@ cargo test --workspace --exclude vulkan_backend
 ## Known issues and deferred work
 
 **Blocked / failed:**
-- Wire Vulkan into runtime; Mesa/OpenGL seam.
+- Mesa/OpenGL compatibility seam.
+- Vulkan draw/dispatch translation, memory-type-aware allocation, and real-hardware validation of those draws. The adapter currently proves the real Vulkan submission/fence path with an offscreen clear; the command-queue and device-lost behavior are mock-tested, and the clear path was exercised on this machine via MoltenVK (Apple M5).
 
 **Rejected / deferred:**
 - Production renderer.

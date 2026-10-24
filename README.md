@@ -41,7 +41,7 @@ Most of the workspace plays the role `llvmpipe`/`lavapipe` play for Mesa: a corr
 
 - **Implemented and tested:** `graphics_api`, `gpu_abstraction`, `graphics_runtime` (including panic containment and fault recovery), `graphics_compat` (thin compatibility seam), and `vulkan_backend` (device enumeration + offscreen clear-color render).
 - **Wired behind a non-default feature:** `vulkan_backend` is reachable through `gpu_abstraction::VulkanDriver`/`graphics_runtime` when `--features vulkan` is enabled, including device-lost mapping and explicit software fallback. The adapter's command queue and device-lost path are tested with a mock backend; the real clear/fence path is exercised on hosts with a loader/ICD.
-- **Not built:** the Mesa/OpenGL compatibility seam and a native SHER driver backend. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) section 21 and [`ROADMAP_HONEST.md`](./ROADMAP_HONEST.md).
+- **Not built:** the Mesa/OpenGL compatibility seam and a native SHER driver backend. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) section 21 and [`docs/internal/ROADMAP_HONEST.md`](docs/internal/ROADMAP_HONEST.md).
 - **No open GitHub issues and no `TODO`/`FIXME` markers in `crates/`** as of the last verification pass.
 
 ## Installation
@@ -102,7 +102,7 @@ let runtime = GraphicsRuntime::<FallbackDriver>::with_vulkan_or_software(16 * 10
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — full design: philosophy, native API/runtime/abstraction layering, Mesa integration strategy, and the phased migration path
 - [`INSTALLATION.md`](./INSTALLATION.md) — setup and troubleshooting
-- [`ROADMAP_HONEST.md`](./ROADMAP_HONEST.md) — honest status/tech-debt supplement to `ARCHITECTURE.md`
+- [`docs/internal/ROADMAP_HONEST.md`](docs/internal/ROADMAP_HONEST.md) — honest status/tech-debt supplement to `ARCHITECTURE.md`
 - [`docs/architecture/README.md`](./docs/architecture/README.md) — as-built Mermaid diagrams
 - [`crates/vulkan_backend/src/lib.rs`](./crates/vulkan_backend/src/lib.rs) — what is real vs. simulated in the Vulkan backend
 - [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md)
@@ -118,7 +118,7 @@ let runtime = GraphicsRuntime::<FallbackDriver>::with_vulkan_or_software(16 * 10
 **Rejected / deferred:**
 - Production renderer.
 
-Full shipped/blocked/rejected detail: [`QUEUE_STATUS.md`](QUEUE_STATUS.md).
+Full shipped/blocked/rejected detail: [`docs/internal/QUEUE_STATUS.md`](docs/internal/QUEUE_STATUS.md).
 
 ## Contributing
 

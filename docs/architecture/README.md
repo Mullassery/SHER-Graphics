@@ -10,7 +10,7 @@ For the full design rationale — why native-first instead of
 Vulkan-first, the Mesa integration strategy, the LKI driver-hosting
 migration path, the security/capability model — see `ARCHITECTURE.md`.
 For a plain list of what's tested vs. not built at all, see
-[`../../ROADMAP_HONEST.md`](../../ROADMAP_HONEST.md).
+[`../../ROADMAP_HONEST.md`](../internal/ROADMAP_HONEST.md).
 
 ## Crate dependency graph (as-built)
 

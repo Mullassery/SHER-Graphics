@@ -14,7 +14,7 @@ commit-level history.
 
 ### Added
 - `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, this
-  `CHANGELOG.md`, and `ROADMAP_HONEST.md`.
+  `CHANGELOG.md`, and `docs/internal/ROADMAP_HONEST.md`.
 - `.github/dependabot.yml` (Cargo + GitHub Actions ecosystems).
 - `.github/ISSUE_TEMPLATE/` (bug report, feature request) and a PR
   template.

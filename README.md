@@ -1,9 +1,9 @@
 # SHER Graphics
 
-Native graphics architecture for [SHER Kernel](https://github.com/Mullassery/SHER-KERNEL): a pure-Rust software GPU reference driver, a capability-secured graphics runtime, and a real Vulkan/`ash` FFI backend.
+Native graphics architecture for [SHER Kernel](../SHER-KERNEL): a pure-Rust software GPU reference driver, a capability-secured graphics runtime, and a real Vulkan/`ash` FFI backend.
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
-[![CI](https://github.com/Mullassery/SHER-Graphics/actions/workflows/ci.yml/badge.svg)](https://github.com/Mullassery/SHER-Graphics/actions/workflows/ci.yml)
+[![CI](../SHER-Graphics/actions/workflows/ci.yml/badge.svg)](../SHER-Graphics/actions/workflows/ci.yml)
 
 ## What it is
 
@@ -49,12 +49,12 @@ Most of the workspace plays the role `llvmpipe`/`lavapipe` play for Mesa: a corr
 Prerequisites:
 
 - Rust 1.75+.
-- [`SHER-KERNEL`](https://github.com/Mullassery/SHER-KERNEL) checked out as a **sibling directory named exactly `SHER-KERNEL`** (`../SHER-KERNEL` relative to this repo).
+- [`SHER-KERNEL`](../SHER-KERNEL) checked out as a **sibling directory named exactly `SHER-KERNEL`** (`../SHER-KERNEL` relative to this repo).
 - *Optional*, for `vulkan_backend`'s tests and the `vulkan` feature to exercise a real device instead of skipping/falling back: a Vulkan loader + ICD. macOS: `brew install molten-vk vulkan-loader vulkan-tools`. Linux: `mesa-vulkan-drivers`/`vulkan-tools` from your distro (what CI uses). Not required to build.
 
 ```bash
-git clone https://github.com/Mullassery/SHER-KERNEL.git
-git clone https://github.com/Mullassery/SHER-Graphics.git
+git clone ../SHER-KERNEL
+git clone ../SHER-Graphics
 cd SHER-Graphics
 ./scripts/install.sh   # checks toolchain + sibling checkout, builds, tests
 ```
@@ -130,14 +130,14 @@ SHER-Graphics is part of the SHER OS family — an AI-native operating system bu
 
 | Tool | Role | What it does |
 |---|---|---|
-| [SHER-KERNEL](https://github.com/Mullassery/SHER-KERNEL) | Kernel core | Core kernel scaffolding: object model, scheduling, memory, driver-lifecycle concepts, and a Linux Kernel Interface (LKI) compatibility layer. |
-| [SHER-Graphics](https://github.com/Mullassery/SHER-Graphics) | Graphics/GPU | **This project** — GPU abstraction and rendering — software simulation plus a real, working Vulkan/MoltenVK backend. |
-| [SHER-Display](https://github.com/Mullassery/SHER-Display) | Display/compositor | Display server, compositor, and window management. |
-| [SHER-INPUT](https://github.com/Mullassery/SHER-INPUT) | Input | Canonical, backend-independent input event stream — real evdev on Linux, simulated backend for hardware-free testing. |
-| [SHER-Aurora](https://github.com/Mullassery/SHER-Aurora) | Design system | GNOME-style design system — tokens, typography, motion, and an automated WCAG contrast audit. |
-| [SHER-Process-Explorer](https://github.com/Mullassery/SHER-Process-Explorer) | Observability | Evidence-based Linux process investigation tool — /proc telemetry, bpftrace integration, daemon + CLI + desktop UI. |
+| [SHER-KERNEL](../SHER-KERNEL) | Kernel core | Core kernel scaffolding: object model, scheduling, memory, driver-lifecycle concepts, and a Linux Kernel Interface (LKI) compatibility layer. |
+| [SHER-Graphics](../SHER-Graphics) | Graphics/GPU | **This project** — GPU abstraction and rendering — software simulation plus a real, working Vulkan/MoltenVK backend. |
+| [SHER-Display](../SHER-Display) | Display/compositor | Display server, compositor, and window management. |
+| [SHER-INPUT](../SHER-INPUT) | Input | Canonical, backend-independent input event stream — real evdev on Linux, simulated backend for hardware-free testing. |
+| [SHER-Aurora](../SHER-Aurora) | Design system | GNOME-style design system — tokens, typography, motion, and an automated WCAG contrast audit. |
+| [SHER-Process-Explorer](../SHER-Process-Explorer) | Observability | Evidence-based Linux process investigation tool — /proc telemetry, bpftrace integration, daemon + CLI + desktop UI. |
 
-Each works standalone; they're complementary by design. [Browse all projects →](https://github.com/Mullassery?tab=repositories)
+Each works standalone; they're complementary by design. [Browse all projects →](../Mullassery-profile)
 
 ## License
 

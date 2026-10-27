@@ -53,8 +53,8 @@ case-insensitive filesystems like macOS/APFS:
 ### 1. Clone both repositories
 
 ```bash
-git clone https://github.com/Mullassery/SHER-KERNEL.git
-git clone https://github.com/Mullassery/SHER-Graphics.git
+git clone ../SHER-KERNEL
+git clone ../SHER-Graphics
 ```
 
 They must sit side by side — if you already have `SHER-KERNEL` checked out
@@ -220,6 +220,6 @@ here installs to system paths, services, or `~/.cargo/bin` yet.
 
 ## Support
 
-- **This repo**: https://github.com/Mullassery/SHER-Graphics
-- **SHER Kernel**: https://github.com/Mullassery/SHER-KERNEL
+- **This repo**: ../SHER-Graphics
+- **SHER Kernel**: ../SHER-KERNEL
 - **Architecture**: [`ARCHITECTURE.md`](./ARCHITECTURE.md)
